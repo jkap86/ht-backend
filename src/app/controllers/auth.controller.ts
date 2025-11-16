@@ -2,12 +2,26 @@
 import { Request, Response, NextFunction } from "express";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
+import crypto from "crypto";
 import { pool } from "../../db/pool";
 import { AuthRequest } from "../middleware/auth.middleware";
+import {
+  AuthenticationError,
+  ConflictError,
+  NotFoundError,
+} from "../utils/errors";
+import { AuthValidator } from "../validators/auth.validator";
 
-const JWT_SECRET = process.env.JWT_SECRET || "dev-secret";
-// 7 days in seconds (prevents TS error with string type)
-const JWT_EXPIRES = 60 * 60 * 24 * 7;
+const JWT_SECRET = process.env.JWT_SECRET;
+
+if (!JWT_SECRET) {
+  throw new Error("JWT_SECRET environment variable must be set");
+}
+
+// Access token expires in 15 minutes
+const JWT_EXPIRES = 60 * 15;
+// Refresh token expires in 30 days
+const REFRESH_TOKEN_EXPIRES_DAYS = 30;
 
 interface UserRow {
   id: string;
@@ -29,9 +43,7 @@ const createUser = async (
 ): Promise<UserRow> => {
   const exists = await findUserByUsername(username);
   if (exists) {
-    const err: any = new Error("Username already in use");
-    err.status = 400;
-    throw err;
+    throw new ConflictError("Username already in use");
   }
 
   const hash = await bcrypt.hash(password, 10);
@@ -64,15 +76,39 @@ const validateUser = async (
 };
 
 const throwErrorAuth = (): never => {
-  const err: any = new Error("Invalid username or password");
-  err.status = 401;
-  throw err;
+  throw new AuthenticationError("Invalid username or password");
 };
 
-const generateToken = (user: UserRow): string => {
+const generateAccessToken = (user: UserRow): string => {
   return jwt.sign({ userId: user.id, username: user.username }, JWT_SECRET, {
     expiresIn: JWT_EXPIRES,
   });
+};
+
+const generateRefreshToken = (): string => {
+  return crypto.randomBytes(64).toString("hex");
+};
+
+const saveRefreshToken = async (userId: string, refreshToken: string): Promise<void> => {
+  const expiresAt = new Date();
+  expiresAt.setDate(expiresAt.getDate() + REFRESH_TOKEN_EXPIRES_DAYS);
+
+  await pool.query(
+    `UPDATE users
+     SET refresh_token = $1, refresh_token_expires_at = $2
+     WHERE id = $3`,
+    [refreshToken, expiresAt, userId]
+  );
+};
+
+const findUserByRefreshToken = async (refreshToken: string): Promise<UserRow | null> => {
+  const result = await pool.query<UserRow>(
+    `SELECT * FROM users
+     WHERE refresh_token = $1
+     AND refresh_token_expires_at > NOW()`,
+    [refreshToken]
+  );
+  return result.rows[0] ?? null;
 };
 
 // ---------------- CONTROLLERS ---------------- //
@@ -83,12 +119,22 @@ export const register = async (
   next: NextFunction
 ) => {
   try {
-    const { username, password } = req.body;
+    const { username, password } = AuthValidator.validateRegistration(
+      req.body.username,
+      req.body.password
+    );
 
     const user = await createUser(username, password);
-    const token = generateToken(user);
+    const accessToken = generateAccessToken(user);
+    const refreshToken = generateRefreshToken();
 
-    res.status(201).json({ user: { id: user.id, username: user.username }, token });
+    await saveRefreshToken(user.id, refreshToken);
+
+    res.status(201).json({
+      user: { id: user.id, username: user.username },
+      token: accessToken,
+      refreshToken,
+    });
   } catch (err) {
     next(err);
   }
@@ -100,12 +146,22 @@ export const login = async (
   next: NextFunction
 ) => {
   try {
-    const { username, password } = req.body;
+    const { username, password } = AuthValidator.validateLogin(
+      req.body.username,
+      req.body.password
+    );
 
     const user = await validateUser(username, password);
-    const token = generateToken(user);
+    const accessToken = generateAccessToken(user);
+    const refreshToken = generateRefreshToken();
 
-    res.json({ user: { id: user.id, username: user.username }, token });
+    await saveRefreshToken(user.id, refreshToken);
+
+    res.json({
+      user: { id: user.id, username: user.username },
+      token: accessToken,
+      refreshToken,
+    });
   } catch (err) {
     next(err);
   }
@@ -117,16 +173,49 @@ export const me = async (
   next: NextFunction
 ) => {
   try {
-    if (!req.user) return res.status(401).json({ error: "Unauthorized" });
+    if (!req.user) {
+      throw new AuthenticationError("Unauthorized");
+    }
 
     const user = await findUserByUsername(req.user.username);
-    if (!user) return res.status(404).json({ error: "User not found" });
+    if (!user) {
+      throw new NotFoundError("User not found");
+    }
 
     res.json({
       user: {
         id: user.id,
         username: user.username,
       },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const refresh = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const refreshToken = AuthValidator.validateRefreshToken(req.body.refreshToken);
+
+    const user = await findUserByRefreshToken(refreshToken);
+
+    if (!user) {
+      throw new AuthenticationError("Invalid or expired refresh token");
+    }
+
+    // Generate new access token and refresh token
+    const newAccessToken = generateAccessToken(user);
+    const newRefreshToken = generateRefreshToken();
+
+    await saveRefreshToken(user.id, newRefreshToken);
+
+    res.json({
+      token: newAccessToken,
+      refreshToken: newRefreshToken,
     });
   } catch (err) {
     next(err);
