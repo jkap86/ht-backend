@@ -26,7 +26,7 @@ export class LeagueRepository implements ILeagueRepository {
 
   async findByUserId(userId: string): Promise<League[]> {
     const result = await this.db.query(
-      `SELECT DISTINCT l.*
+      `SELECT l.*, r.roster_id as user_roster_id
        FROM leagues l
        INNER JOIN rosters r ON r.league_id = l.id
        WHERE r.user_id = $1

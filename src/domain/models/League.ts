@@ -11,6 +11,8 @@ export class League {
     public readonly status: string,
     public readonly draftType: string | null,
     public readonly draftDate: Date | null,
+    public readonly commissionerRosterId: number | null,
+    public readonly userRosterId: number | null, // Current user's roster_id (set by query)
     public readonly settings: Record<string, any>,
     public readonly scoringSettings: Record<string, any>,
     public readonly rosterPositions: Record<string, number>,
@@ -29,6 +31,8 @@ export class League {
     status: string;
     draft_type?: string | null;
     draft_date?: Date | null;
+    commissioner_roster_id?: number | null;
+    user_roster_id?: number | null;
     settings: Record<string, any>;
     scoring_settings: Record<string, any>;
     roster_positions: Record<string, number>;
@@ -43,6 +47,8 @@ export class League {
       row.status,
       row.draft_type || null,
       row.draft_date || null,
+      row.commissioner_roster_id || null,
+      row.user_roster_id || null,
       row.settings,
       row.scoring_settings,
       row.roster_positions,
@@ -92,6 +98,8 @@ export class League {
       status: this.status,
       draft_type: this.draftType,
       draft_date: this.draftDate,
+      commissioner_roster_id: this.commissionerRosterId,
+      user_roster_id: this.userRosterId,
       settings: this.settings,
       scoring_settings: this.scoringSettings,
       roster_positions: this.rosterPositions,
