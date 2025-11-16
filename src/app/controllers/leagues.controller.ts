@@ -25,6 +25,11 @@ interface RosterRow {
   roster_id: number;
 }
 
+interface LeagueResponse extends LeagueRow {
+  user_roster_id: number;
+  commissioner_roster_id: number | null;
+}
+
 /**
  * GET /api/leagues/my-leagues
  * Get all leagues for the authenticated user
@@ -41,9 +46,13 @@ export const getMyLeagues = async (
       throw new ValidationError("User ID not found in request");
     }
 
-    // Get all leagues where the user has a roster
-    const result = await pool.query<LeagueRow>(
-      `SELECT DISTINCT l.*
+    // Get all leagues where the user has a roster, including the user's roster_id
+    const result = await pool.query<LeagueRow & { user_roster_id: number }>(
+      `SELECT DISTINCT
+         l.id, l.name, l.status, l.settings, l.scoring_settings,
+         l.season, l.season_type, l.roster_positions, l.total_rosters,
+         l.created_at, l.updated_at,
+         r.roster_id as user_roster_id
        FROM leagues l
        INNER JOIN rosters r ON r.league_id = l.id
        WHERE r.user_id = $1
@@ -51,7 +60,13 @@ export const getMyLeagues = async (
       [userId]
     );
 
-    return res.status(200).json(result.rows);
+    // Extract commissioner_roster_id from settings and add it to top level for frontend
+    const leagues: LeagueResponse[] = result.rows.map((league): LeagueResponse => ({
+      ...league,
+      commissioner_roster_id: (league.settings as any)?.commissioner_roster_id ?? null,
+    }));
+
+    return res.status(200).json(leagues);
   } catch (error) {
     next(error);
   }
@@ -93,7 +108,13 @@ export const getLeague = async (
       throw new NotFoundError("League not found");
     }
 
-    return res.status(200).json(result.rows[0]);
+    // Extract commissioner_roster_id from settings and add it to top level
+    const league = {
+      ...result.rows[0],
+      commissioner_roster_id: result.rows[0].settings?.commissioner_roster_id || null,
+    };
+
+    return res.status(200).json(league);
   } catch (error) {
     next(error);
   }
@@ -137,6 +158,12 @@ export const createLeague = async (
       throw new ValidationError("Total rosters must be between 2 and 20");
     }
 
+    // Add commissioner_roster_id to settings (creator is always roster_id 1)
+    const settingsWithCommissioner = {
+      ...settings,
+      commissioner_roster_id: 1,
+    };
+
     // Create the league
     const leagueResult = await pool.query<LeagueRow>(
       `INSERT INTO leagues (name, season, total_rosters, settings, scoring_settings, roster_positions, season_type, status)
@@ -146,7 +173,7 @@ export const createLeague = async (
         name.trim(),
         season,
         total_rosters,
-        JSON.stringify(settings),
+        JSON.stringify(settingsWithCommissioner),
         JSON.stringify(scoring_settings),
         JSON.stringify(roster_positions),
         season_type,
@@ -155,14 +182,20 @@ export const createLeague = async (
 
     const league = leagueResult.rows[0];
 
-    // Create a roster for the league creator (roster_id = 1)
+    // Create a roster for the league creator (roster_id = 1, who is also the commissioner)
     await pool.query(
       `INSERT INTO rosters (league_id, user_id, roster_id)
        VALUES ($1, $2, $3)`,
       [league.id, userId, 1]
     );
 
-    return res.status(201).json(league);
+    // Return league with commissioner_roster_id at top level for frontend
+    const leagueWithCommissioner = {
+      ...league,
+      commissioner_roster_id: 1,
+    };
+
+    return res.status(201).json(leagueWithCommissioner);
   } catch (error) {
     next(error);
   }
