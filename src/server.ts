@@ -1,9 +1,11 @@
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
+import { createServer } from "http";
 
 import router from "./app/routes";
 import { errorHandler } from "./app/middleware/error.middleware";
+import { initializeSocketService } from "./app/services/socket.service";
 
 dotenv.config();
 
@@ -21,8 +23,13 @@ app.use(errorHandler);
 
 const PORT = process.env.PORT || 5000;
 
-const server = app.listen(PORT, () => {
+// Create HTTP server and initialize Socket.IO
+const server = createServer(app);
+initializeSocketService(server);
+
+server.listen(PORT, () => {
   console.log(`Backend running on port ${PORT}`);
+  console.log(`WebSocket server initialized`);
 });
 
 // Keep the process alive

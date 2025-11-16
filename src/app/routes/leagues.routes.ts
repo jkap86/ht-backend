@@ -5,6 +5,8 @@ import {
   getMyLeagues,
   getLeague,
   createLeague,
+  joinLeague,
+  updateLeague,
 } from "../controllers/leagues.controller";
 import {
   getChatMessages,
@@ -24,6 +26,12 @@ router.get("/:id", getLeague);
 
 // POST /api/leagues - Create a new league
 router.post("/", createLeague);
+
+// POST /api/leagues/:id/join - Join a league
+router.post("/:id/join", joinLeague);
+
+// PUT /api/leagues/:id - Update league settings
+router.put("/:id", updateLeague);
 
 // GET /api/leagues/:leagueId/chat - Get chat messages for a league
 router.get("/:leagueId/chat", getChatMessages);

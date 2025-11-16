@@ -3,6 +3,7 @@ import { Response, NextFunction } from "express";
 import { pool } from "../../db/pool";
 import { AuthRequest } from "../middleware/auth.middleware";
 import { NotFoundError, ValidationError } from "../utils/errors";
+import { sendSystemMessage } from "./leagueChat.controller";
 
 interface LeagueRow {
   id: number;
@@ -121,6 +122,92 @@ export const getLeague = async (
 };
 
 /**
+ * POST /api/leagues/:id/join
+ * Join a league
+ */
+export const joinLeague = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const userId = req.user?.userId;
+    const leagueId = parseInt(req.params.id, 10);
+
+    if (!userId) {
+      throw new ValidationError("User ID not found in request");
+    }
+
+    if (isNaN(leagueId)) {
+      throw new ValidationError("Invalid league ID");
+    }
+
+    // Check if league exists
+    const leagueResult = await pool.query<LeagueRow>(
+      "SELECT * FROM leagues WHERE id = $1",
+      [leagueId]
+    );
+
+    if (leagueResult.rows.length === 0) {
+      throw new NotFoundError("League not found");
+    }
+
+    const league = leagueResult.rows[0];
+
+    // Check if user is already in the league
+    const existingRoster = await pool.query<RosterRow>(
+      "SELECT id FROM rosters WHERE league_id = $1 AND user_id = $2",
+      [leagueId, userId]
+    );
+
+    if (existingRoster.rows.length > 0) {
+      throw new ValidationError("You are already a member of this league");
+    }
+
+    // Get the next available roster_id
+    const rosterCountResult = await pool.query<{ count: string }>(
+      "SELECT COUNT(*) as count FROM rosters WHERE league_id = $1",
+      [leagueId]
+    );
+
+    const rosterCount = parseInt(rosterCountResult.rows[0].count, 10);
+
+    // Check if league is full
+    if (rosterCount >= league.total_rosters) {
+      throw new ValidationError("This league is full");
+    }
+
+    const nextRosterId = rosterCount + 1;
+
+    // Add user to league
+    await pool.query(
+      `INSERT INTO rosters (league_id, user_id, roster_id)
+       VALUES ($1, $2, $3)`,
+      [leagueId, userId, nextRosterId]
+    );
+
+    // Send system message to league chat
+    const userResult = await pool.query(
+      "SELECT username FROM users WHERE id = $1",
+      [userId]
+    );
+    const username = userResult.rows[0]?.username || 'Unknown';
+    await sendSystemMessage(
+      leagueId,
+      `${username} joined the league`,
+      { event: 'user_joined', username, roster_id: nextRosterId }
+    );
+
+    return res.status(200).json({
+      message: "Successfully joined league",
+      roster_id: nextRosterId,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
  * POST /api/leagues
  * Create a new league
  */
@@ -189,6 +276,18 @@ export const createLeague = async (
       [league.id, userId, 1]
     );
 
+    // Send system message to league chat
+    const userResult = await pool.query(
+      "SELECT username FROM users WHERE id = $1",
+      [userId]
+    );
+    const username = userResult.rows[0]?.username || 'Unknown';
+    await sendSystemMessage(
+      league.id,
+      `${username} created the league "${name.trim()}"`,
+      { event: 'league_created', league_name: name.trim(), creator: username }
+    );
+
     // Return league with commissioner_roster_id at top level for frontend
     const leagueWithCommissioner = {
       ...league,
@@ -196,6 +295,132 @@ export const createLeague = async (
     };
 
     return res.status(201).json(leagueWithCommissioner);
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * PUT /api/leagues/:id
+ * Update league settings
+ */
+export const updateLeague = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const userId = req.user?.userId;
+    const leagueId = parseInt(req.params.id, 10);
+
+    if (!userId) {
+      throw new ValidationError("User ID not found in request");
+    }
+
+    if (isNaN(leagueId)) {
+      throw new ValidationError("Invalid league ID");
+    }
+
+    // Check if league exists
+    const leagueResult = await pool.query<LeagueRow>(
+      "SELECT * FROM leagues WHERE id = $1",
+      [leagueId]
+    );
+
+    if (leagueResult.rows.length === 0) {
+      throw new NotFoundError("League not found");
+    }
+
+    const league = leagueResult.rows[0];
+
+    // Check if user is commissioner
+    const commissionerRosterId = league.settings?.commissioner_roster_id;
+    const userRoster = await pool.query<RosterRow>(
+      "SELECT roster_id FROM rosters WHERE league_id = $1 AND user_id = $2",
+      [leagueId, userId]
+    );
+
+    if (userRoster.rows.length === 0) {
+      throw new NotFoundError("You are not a member of this league");
+    }
+
+    if (userRoster.rows[0].roster_id !== commissionerRosterId) {
+      throw new ValidationError("Only the commissioner can update league settings");
+    }
+
+    // Build update query
+    const updates: string[] = [];
+    const values: any[] = [];
+    let paramIndex = 1;
+
+    if (req.body.name) {
+      updates.push(`name = $${paramIndex++}`);
+      values.push(req.body.name);
+    }
+
+    if (req.body.settings) {
+      updates.push(`settings = $${paramIndex++}`);
+      values.push(JSON.stringify(req.body.settings));
+    }
+
+    if (req.body.scoring_settings) {
+      updates.push(`scoring_settings = $${paramIndex++}`);
+      values.push(JSON.stringify(req.body.scoring_settings));
+    }
+
+    if (req.body.status) {
+      updates.push(`status = $${paramIndex++}`);
+      values.push(req.body.status);
+    }
+
+    if (updates.length === 0) {
+      throw new ValidationError("No updates provided");
+    }
+
+    updates.push(`updated_at = CURRENT_TIMESTAMP`);
+    values.push(leagueId);
+
+    // Update the league
+    const result = await pool.query<LeagueRow>(
+      `UPDATE leagues SET ${updates.join(", ")} WHERE id = $${paramIndex} RETURNING *`,
+      values
+    );
+
+    // Send system message to league chat
+    const userResult = await pool.query(
+      "SELECT username FROM users WHERE id = $1",
+      [userId]
+    );
+    const username = userResult.rows[0]?.username || 'Unknown';
+
+    // Create a meaningful message about what changed
+    const changes = [];
+    if (req.body.name && req.body.name !== league.name) {
+      changes.push(`league name to "${req.body.name}"`);
+    }
+    if (req.body.status && req.body.status !== league.status) {
+      changes.push(`status to "${req.body.status}"`);
+    }
+    if (req.body.settings || req.body.scoring_settings) {
+      changes.push('league settings');
+    }
+
+    if (changes.length > 0) {
+      await sendSystemMessage(
+        leagueId,
+        `${username} updated ${changes.join(', ')}`,
+        { event: 'settings_updated', username, changes }
+      );
+    }
+
+    // Return updated league with user_roster_id
+    const updatedLeague = {
+      ...result.rows[0],
+      commissioner_roster_id: result.rows[0].settings?.commissioner_roster_id || null,
+      user_roster_id: userRoster.rows[0].roster_id,
+    };
+
+    return res.status(200).json(updatedLeague);
   } catch (error) {
     next(error);
   }
