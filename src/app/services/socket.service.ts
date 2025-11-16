@@ -11,6 +11,10 @@ interface JoinLeagueData {
   leagueId: number;
 }
 
+interface JoinDMData {
+  conversationId: string;
+}
+
 interface ChatMessageData {
   id: number;
   league_id: number;
@@ -19,6 +23,18 @@ interface ChatMessageData {
   message: string;
   message_type: string;
   metadata: any;
+  created_at: Date;
+}
+
+interface DirectMessageData {
+  id: number;
+  sender_id: string;
+  receiver_id: string;
+  sender_username: string;
+  receiver_username: string;
+  message: string;
+  metadata: any;
+  read: boolean;
   created_at: Date;
 }
 
@@ -82,6 +98,22 @@ export class SocketService {
         console.log(`User ${socket.userId} left league ${leagueId}`);
       });
 
+      // Join a DM conversation room
+      socket.on('join_dm', (data: JoinDMData) => {
+        const { conversationId } = data;
+        const roomName = `dm_${conversationId}`;
+        socket.join(roomName);
+        console.log(`User ${socket.userId} joined DM conversation ${conversationId}`);
+      });
+
+      // Leave a DM conversation room
+      socket.on('leave_dm', (data: JoinDMData) => {
+        const { conversationId } = data;
+        const roomName = `dm_${conversationId}`;
+        socket.leave(roomName);
+        console.log(`User ${socket.userId} left DM conversation ${conversationId}`);
+      });
+
       // Handle disconnection
       socket.on('disconnect', () => {
         console.log(`User disconnected: ${socket.userId}`);
@@ -99,6 +131,18 @@ export class SocketService {
     const sockets = this.io.sockets.adapter.rooms.get(roomName);
     console.log(`[SocketService] Number of clients in room ${roomName}:`, sockets ? sockets.size : 0);
     this.io.to(roomName).emit('new_message', message);
+  }
+
+  /**
+   * Emit a direct message to users in a DM conversation
+   */
+  public emitDirectMessage(conversationId: string, message: DirectMessageData) {
+    const roomName = `dm_${conversationId}`;
+    console.log(`[SocketService] Emitting DM to room: ${roomName}`);
+    console.log(`[SocketService] DM data:`, JSON.stringify(message, null, 2));
+    const sockets = this.io.sockets.adapter.rooms.get(roomName);
+    console.log(`[SocketService] Number of clients in room ${roomName}:`, sockets ? sockets.size : 0);
+    this.io.to(roomName).emit('new_dm', message);
   }
 
   /**
