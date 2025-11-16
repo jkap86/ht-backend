@@ -46,7 +46,12 @@ export class User {
   /**
    * Get user without password hash (for responses)
    */
-  toSafeObject(): Omit<User, 'passwordHash'> {
+  toSafeObject(): {
+    userId: string;
+    username: string;
+    createdAt: Date;
+    updatedAt: Date;
+  } {
     return {
       userId: this.userId,
       username: this.username,
