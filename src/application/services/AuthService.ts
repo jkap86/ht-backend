@@ -101,7 +101,12 @@ export class AuthService {
   /**
    * Get current user info
    */
-  async getCurrentUser(userId: string): Promise<Omit<User, 'passwordHash'>> {
+  async getCurrentUser(userId: string): Promise<{
+    userId: string;
+    username: string;
+    createdAt: Date;
+    updatedAt: Date;
+  }> {
     const user = await this.userRepository.findById(userId);
     if (!user) {
       throw new InvalidCredentialsException('User not found');
@@ -180,7 +185,12 @@ export class AuthService {
  * Authentication result
  */
 export interface AuthResult {
-  user: Omit<User, 'passwordHash'>;
+  user: {
+    userId: string;
+    username: string;
+    createdAt: Date;
+    updatedAt: Date;
+  };
   token: string;
   refreshToken: string;
 }

@@ -6,6 +6,10 @@ import {
   getLeague,
   createLeague,
 } from "../controllers/leagues.controller";
+import {
+  getChatMessages,
+  sendChatMessage,
+} from "../controllers/leagueChat.controller";
 
 const router = Router();
 
@@ -20,5 +24,11 @@ router.get("/:id", getLeague);
 
 // POST /api/leagues - Create a new league
 router.post("/", createLeague);
+
+// GET /api/leagues/:leagueId/chat - Get chat messages for a league
+router.get("/:leagueId/chat", getChatMessages);
+
+// POST /api/leagues/:leagueId/chat - Send a chat message to a league
+router.post("/:leagueId/chat", sendChatMessage);
 
 export default router;
