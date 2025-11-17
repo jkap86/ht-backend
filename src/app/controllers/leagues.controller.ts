@@ -612,3 +612,262 @@ export const deleteLeague = async (
     next(error);
   }
 };
+
+/**
+ * POST /api/leagues/:id/dev/add-users
+ * Developer endpoint to add multiple users to a league by username
+ */
+export const devAddUsersToLeague = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const leagueId = parseInt(req.params.id, 10);
+    const { usernames } = req.body;
+
+    if (isNaN(leagueId)) {
+      throw new ValidationError("Invalid league ID");
+    }
+
+    if (!Array.isArray(usernames) || usernames.length === 0) {
+      throw new ValidationError("usernames must be a non-empty array");
+    }
+
+    // Check if league exists
+    const leagueResult = await pool.query<LeagueRow>(
+      "SELECT * FROM leagues WHERE id = $1",
+      [leagueId]
+    );
+
+    if (leagueResult.rows.length === 0) {
+      throw new NotFoundError("League not found");
+    }
+
+    const league = leagueResult.rows[0];
+    const results = [];
+
+    for (const username of usernames) {
+      try {
+        // Get user ID from username
+        const userResult = await pool.query<{ id: string }>(
+          "SELECT id FROM users WHERE username = $1",
+          [username]
+        );
+
+        if (userResult.rows.length === 0) {
+          results.push({ username, success: false, error: "User not found" });
+          continue;
+        }
+
+        const userId = userResult.rows[0].id;
+
+        // Check if user is already in the league
+        const existingRoster = await pool.query<RosterRow>(
+          "SELECT id FROM rosters WHERE league_id = $1 AND user_id = $2",
+          [leagueId, userId]
+        );
+
+        if (existingRoster.rows.length > 0) {
+          results.push({ username, success: false, error: "Already in league" });
+          continue;
+        }
+
+        // Get the next available roster_id
+        const rosterCountResult = await pool.query<{ count: string }>(
+          "SELECT COUNT(*) as count FROM rosters WHERE league_id = $1",
+          [leagueId]
+        );
+
+        const rosterCount = parseInt(rosterCountResult.rows[0].count, 10);
+
+        // Check if league is full
+        if (rosterCount >= league.total_rosters) {
+          results.push({ username, success: false, error: "League is full" });
+          continue;
+        }
+
+        const nextRosterId = rosterCount + 1;
+
+        // Add user to league
+        await pool.query(
+          `INSERT INTO rosters (league_id, user_id, roster_id)
+           VALUES ($1, $2, $3)`,
+          [leagueId, userId, nextRosterId]
+        );
+
+        // Send system message to league chat
+        await sendSystemMessage(
+          leagueId,
+          `${username} joined the league`,
+          { event: 'user_joined', username, rosterId: nextRosterId }
+        );
+
+        results.push({ username, success: true, rosterId: nextRosterId });
+      } catch (error) {
+        results.push({ username, success: false, error: String(error) });
+      }
+    }
+
+    return res.status(200).json({ results });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * GET /api/leagues/:id/members
+ * Get all members of a league with their payment status
+ */
+export const getLeagueMembers = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const userId = req.user?.userId;
+    const leagueId = parseInt(req.params.id, 10);
+
+    if (!userId) {
+      throw new ValidationError("User ID not found in request");
+    }
+
+    if (isNaN(leagueId)) {
+      throw new ValidationError("Invalid league ID");
+    }
+
+    // Check if user is a member of this league
+    const userRoster = await pool.query<RosterRow>(
+      "SELECT id FROM rosters WHERE league_id = $1 AND user_id = $2",
+      [leagueId, userId]
+    );
+
+    if (userRoster.rows.length === 0) {
+      throw new NotFoundError("You are not a member of this league");
+    }
+
+    // Get all league members with their usernames and payment status
+    const members = await pool.query(
+      `SELECT
+        r.id as roster_id,
+        r.roster_id as roster_number,
+        r.settings,
+        u.id as user_id,
+        u.username
+      FROM rosters r
+      JOIN users u ON r.user_id = u.id
+      WHERE r.league_id = $1
+      ORDER BY r.roster_id ASC`,
+      [leagueId]
+    );
+
+    const membersWithPayment = members.rows.map(row => ({
+      rosterId: row.roster_number,
+      userId: row.user_id,
+      username: row.username,
+      paid: row.settings?.paid === true || false,
+    }));
+
+    return res.status(200).json({ members: membersWithPayment });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * PATCH /api/leagues/:id/members/:rosterId/payment
+ * Toggle payment status for a league member (commissioner only)
+ */
+export const toggleMemberPayment = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const userId = req.user?.userId;
+    const leagueId = parseInt(req.params.id, 10);
+    const rosterId = parseInt(req.params.rosterId, 10);
+    const { paid } = req.body;
+
+    if (!userId) {
+      throw new ValidationError("User ID not found in request");
+    }
+
+    if (isNaN(leagueId) || isNaN(rosterId)) {
+      throw new ValidationError("Invalid league ID or roster ID");
+    }
+
+    if (typeof paid !== 'boolean') {
+      throw new ValidationError("paid must be a boolean");
+    }
+
+    // Check if league exists and get commissioner info
+    const leagueResult = await pool.query<LeagueRow>(
+      "SELECT * FROM leagues WHERE id = $1",
+      [leagueId]
+    );
+
+    if (leagueResult.rows.length === 0) {
+      throw new NotFoundError("League not found");
+    }
+
+    const league = leagueResult.rows[0];
+
+    // Check if user is commissioner
+    const commissionerRosterId = league.settings?.commissioner_roster_id;
+    const userRoster = await pool.query<RosterRow>(
+      "SELECT roster_id FROM rosters WHERE league_id = $1 AND user_id = $2",
+      [leagueId, userId]
+    );
+
+    if (userRoster.rows.length === 0) {
+      throw new NotFoundError("You are not a member of this league");
+    }
+
+    if (userRoster.rows[0].roster_id !== commissionerRosterId) {
+      throw new ValidationError("Only the commissioner can update payment status");
+    }
+
+    // Update the payment status
+    const updateResult = await pool.query(
+      `UPDATE rosters
+       SET settings = COALESCE(settings, '{}'::jsonb) || jsonb_build_object('paid', $1::boolean),
+           updated_at = CURRENT_TIMESTAMP
+       WHERE league_id = $2 AND roster_id = $3
+       RETURNING roster_id, settings`,
+      [paid, leagueId, rosterId]
+    );
+
+    if (updateResult.rows.length === 0) {
+      throw new NotFoundError("Roster not found");
+    }
+
+    // Get the username of the member whose payment status was updated
+    const memberResult = await pool.query(
+      `SELECT u.username
+       FROM rosters r
+       JOIN users u ON r.user_id = u.id
+       WHERE r.league_id = $1 AND r.roster_id = $2`,
+      [leagueId, rosterId]
+    );
+
+    if (memberResult.rows.length > 0) {
+      const memberUsername = memberResult.rows[0].username;
+      const statusText = paid ? 'paid their dues' : 'marked as unpaid';
+
+      // Send system message to league chat
+      await sendSystemMessage(
+        leagueId,
+        `${memberUsername} ${statusText}`,
+        { event: 'payment_status_changed', username: memberUsername, paid, rosterId }
+      );
+    }
+
+    return res.status(200).json({
+      rosterId: updateResult.rows[0].roster_id,
+      paid: updateResult.rows[0].settings.paid,
+    });
+  } catch (error) {
+    next(error);
+  }
+};

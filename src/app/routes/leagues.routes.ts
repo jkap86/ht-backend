@@ -9,6 +9,9 @@ import {
   updateLeague,
   resetLeague,
   deleteLeague,
+  devAddUsersToLeague,
+  getLeagueMembers,
+  toggleMemberPayment,
 } from "../controllers/leagues.controller";
 import {
   getChatMessages,
@@ -46,5 +49,14 @@ router.get("/:leagueId/chat", getChatMessages);
 
 // POST /api/leagues/:leagueId/chat - Send a chat message to a league
 router.post("/:leagueId/chat", sendChatMessage);
+
+// POST /api/leagues/:id/dev/add-users - Developer endpoint to add multiple users to league
+router.post("/:id/dev/add-users", devAddUsersToLeague);
+
+// GET /api/leagues/:id/members - Get all members of a league with payment status
+router.get("/:id/members", getLeagueMembers);
+
+// PATCH /api/leagues/:id/members/:rosterId/payment - Toggle payment status for a member (commissioner only)
+router.patch("/:id/members/:rosterId/payment", toggleMemberPayment);
 
 export default router;
