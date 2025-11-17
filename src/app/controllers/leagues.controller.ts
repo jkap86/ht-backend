@@ -425,3 +425,190 @@ export const updateLeague = async (
     next(error);
   }
 };
+
+/**
+ * POST /api/leagues/:id/reset
+ * Reset league - clears rosters, drafts, and matchups but preserves settings
+ */
+export const resetLeague = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const userId = req.user?.userId;
+    const leagueId = parseInt(req.params.id, 10);
+
+    if (!userId) {
+      throw new ValidationError("User ID not found in request");
+    }
+
+    if (isNaN(leagueId)) {
+      throw new ValidationError("Invalid league ID");
+    }
+
+    // Check if league exists
+    const leagueResult = await pool.query<LeagueRow>(
+      "SELECT * FROM leagues WHERE id = $1",
+      [leagueId]
+    );
+
+    if (leagueResult.rows.length === 0) {
+      throw new NotFoundError("League not found");
+    }
+
+    const league = leagueResult.rows[0];
+
+    // Check if user is commissioner
+    const commissionerRosterId = league.settings?.commissioner_roster_id;
+    const userRoster = await pool.query<RosterRow>(
+      "SELECT roster_id FROM rosters WHERE league_id = $1 AND user_id = $2",
+      [leagueId, userId]
+    );
+
+    if (userRoster.rows.length === 0) {
+      throw new NotFoundError("You are not a member of this league");
+    }
+
+    if (userRoster.rows[0].roster_id !== commissionerRosterId) {
+      throw new ValidationError("Only the commissioner can reset the league");
+    }
+
+    // Start transaction
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Delete all rosters except the commissioner's
+      await client.query(
+        "DELETE FROM rosters WHERE league_id = $1 AND roster_id != $2",
+        [leagueId, commissionerRosterId]
+      );
+
+      // TODO: When draft tables exist, delete draft picks
+      // TODO: When matchup tables exist, delete matchups
+      // TODO: When player_roster tables exist, clear rosters
+
+      // Reset league status to pre_draft
+      await client.query(
+        "UPDATE leagues SET status = 'pre_draft', updated_at = CURRENT_TIMESTAMP WHERE id = $1",
+        [leagueId]
+      );
+
+      await client.query('COMMIT');
+
+      // Send system message to league chat
+      const userResult = await pool.query(
+        "SELECT username FROM users WHERE id = $1",
+        [userId]
+      );
+      const username = userResult.rows[0]?.username || 'Unknown';
+      await sendSystemMessage(
+        leagueId,
+        `${username} reset the league`,
+        { event: 'league_reset', username }
+      );
+
+      return res.status(200).json({ message: "League reset successfully" });
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * DELETE /api/leagues/:id
+ * Delete league permanently
+ */
+export const deleteLeague = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const userId = req.user?.userId;
+    const leagueId = parseInt(req.params.id, 10);
+
+    if (!userId) {
+      throw new ValidationError("User ID not found in request");
+    }
+
+    if (isNaN(leagueId)) {
+      throw new ValidationError("Invalid league ID");
+    }
+
+    // Check if league exists
+    const leagueResult = await pool.query<LeagueRow>(
+      "SELECT * FROM leagues WHERE id = $1",
+      [leagueId]
+    );
+
+    if (leagueResult.rows.length === 0) {
+      throw new NotFoundError("League not found");
+    }
+
+    const league = leagueResult.rows[0];
+
+    // Check if user is commissioner
+    const commissionerRosterId = league.settings?.commissioner_roster_id;
+    const userRoster = await pool.query<RosterRow>(
+      "SELECT roster_id FROM rosters WHERE league_id = $1 AND user_id = $2",
+      [leagueId, userId]
+    );
+
+    if (userRoster.rows.length === 0) {
+      throw new NotFoundError("You are not a member of this league");
+    }
+
+    if (userRoster.rows[0].roster_id !== commissionerRosterId) {
+      throw new ValidationError("Only the commissioner can delete the league");
+    }
+
+    // Start transaction
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Delete all chat messages
+      await client.query(
+        "DELETE FROM league_chat_messages WHERE league_id = $1",
+        [leagueId]
+      );
+
+      // Delete all rosters
+      await client.query(
+        "DELETE FROM rosters WHERE league_id = $1",
+        [leagueId]
+      );
+
+      // TODO: When other tables exist, delete:
+      // - draft picks
+      // - matchups
+      // - player rosters
+      // - trades
+      // - waiver claims
+
+      // Delete the league
+      await client.query(
+        "DELETE FROM leagues WHERE id = $1",
+        [leagueId]
+      );
+
+      await client.query('COMMIT');
+
+      return res.status(200).json({ message: "League deleted successfully" });
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  } catch (error) {
+    next(error);
+  }
+};

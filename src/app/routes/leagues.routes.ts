@@ -7,6 +7,8 @@ import {
   createLeague,
   joinLeague,
   updateLeague,
+  resetLeague,
+  deleteLeague,
 } from "../controllers/leagues.controller";
 import {
   getChatMessages,
@@ -32,6 +34,12 @@ router.post("/:id/join", joinLeague);
 
 // PUT /api/leagues/:id - Update league settings
 router.put("/:id", updateLeague);
+
+// POST /api/leagues/:id/reset - Reset league (commissioner only)
+router.post("/:id/reset", resetLeague);
+
+// DELETE /api/leagues/:id - Delete league (commissioner only)
+router.delete("/:id", deleteLeague);
 
 // GET /api/leagues/:leagueId/chat - Get chat messages for a league
 router.get("/:leagueId/chat", getChatMessages);
