@@ -179,11 +179,16 @@ export const joinLeague = async (
 
     const nextRosterId = rosterCount + 1;
 
+    // Check if league has dues - if free (dues = 0), automatically mark as paid
+    const dues = (league.settings?.dues as number) || 0;
+    const autoMarkPaid = dues === 0;
+    const rosterSettings = autoMarkPaid ? { paid: true } : {};
+
     // Add user to league
     await pool.query(
-      `INSERT INTO rosters (league_id, user_id, roster_id)
-       VALUES ($1, $2, $3)`,
-      [leagueId, userId, nextRosterId]
+      `INSERT INTO rosters (league_id, user_id, roster_id, settings)
+       VALUES ($1, $2, $3, $4)`,
+      [leagueId, userId, nextRosterId, JSON.stringify(rosterSettings)]
     );
 
     // Send system message to league chat
@@ -269,11 +274,16 @@ export const createLeague = async (
 
     const league = leagueResult.rows[0];
 
+    // Check if league has dues - if free (dues = 0), automatically mark as paid
+    const dues = (settingsWithCommissioner.dues as number) || 0;
+    const autoMarkPaid = dues === 0;
+    const rosterSettings = autoMarkPaid ? { paid: true } : {};
+
     // Create a roster for the league creator (roster_id = 1, who is also the commissioner)
     await pool.query(
-      `INSERT INTO rosters (league_id, user_id, roster_id)
-       VALUES ($1, $2, $3)`,
-      [league.id, userId, 1]
+      `INSERT INTO rosters (league_id, user_id, roster_id, settings)
+       VALUES ($1, $2, $3, $4)`,
+      [league.id, userId, 1, JSON.stringify(rosterSettings)]
     );
 
     // Send system message to league chat
@@ -689,11 +699,16 @@ export const devAddUsersToLeague = async (
 
         const nextRosterId = rosterCount + 1;
 
+        // Check if league has dues - if free (dues = 0), automatically mark as paid
+        const dues = (league.settings?.dues as number) || 0;
+        const autoMarkPaid = dues === 0;
+        const rosterSettings = autoMarkPaid ? { paid: true } : {};
+
         // Add user to league
         await pool.query(
-          `INSERT INTO rosters (league_id, user_id, roster_id)
-           VALUES ($1, $2, $3)`,
-          [leagueId, userId, nextRosterId]
+          `INSERT INTO rosters (league_id, user_id, roster_id, settings)
+           VALUES ($1, $2, $3, $4)`,
+          [leagueId, userId, nextRosterId, JSON.stringify(rosterSettings)]
         );
 
         // Send system message to league chat
@@ -746,6 +761,16 @@ export const getLeagueMembers = async (
       throw new NotFoundError("You are not a member of this league");
     }
 
+    // Get league info to check if it's free
+    const leagueResult = await pool.query<LeagueRow>(
+      "SELECT settings FROM leagues WHERE id = $1",
+      [leagueId]
+    );
+
+    const league = leagueResult.rows[0];
+    const dues = (league?.settings?.dues as number) || 0;
+    const isFreeLeague = dues === 0;
+
     // Get all league members with their usernames and payment status
     const members = await pool.query(
       `SELECT
@@ -765,7 +790,8 @@ export const getLeagueMembers = async (
       rosterId: row.roster_number,
       userId: row.user_id,
       username: row.username,
-      paid: row.settings?.paid === true || false,
+      // If league is free, everyone is automatically paid
+      paid: isFreeLeague ? true : (row.settings?.paid === true || false),
     }));
 
     return res.status(200).json({ members: membersWithPayment });
