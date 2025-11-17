@@ -1,11 +1,18 @@
 /**
  * Refactored Auth Controller
  * Thin controller that delegates to AuthService for business logic
+ * Returns API-compliant responses matching AuthResponses.ts contracts
  */
 import { Request, Response, NextFunction } from 'express';
 import { Container } from '../../infrastructure/di/Container';
 import { AuthService } from '../../application/services/AuthService';
 import { AuthRequest } from '../middleware/auth.middleware';
+import {
+  AuthResponse,
+  MeResponse,
+  RefreshResponse,
+  UserResponse,
+} from '../types/AuthResponses';
 
 export class AuthController {
   private authService: AuthService;
@@ -16,8 +23,27 @@ export class AuthController {
   }
 
   /**
+   * Helper to map domain user to API UserResponse
+   * Maps userId -> id for frontend compatibility
+   */
+  private mapUserToResponse(user: {
+    userId: string;
+    username: string;
+    createdAt?: Date;
+    updatedAt?: Date;
+  }): UserResponse {
+    return {
+      id: user.userId, // Frontend expects 'id', not 'userId'
+      username: user.username,
+      createdAt: user.createdAt,
+      updatedAt: user.updatedAt,
+    };
+  }
+
+  /**
    * Register a new user
    * POST /api/auth/register
+   * Returns: AuthResponse with user, token, refreshToken
    */
   register = async (
     req: Request,
@@ -29,7 +55,13 @@ export class AuthController {
 
       const result = await this.authService.register(username, password);
 
-      res.status(201).json(result);
+      const response: AuthResponse = {
+        user: this.mapUserToResponse(result.user),
+        token: result.token,
+        refreshToken: result.refreshToken,
+      };
+
+      res.status(201).json(response);
     } catch (error) {
       next(error);
     }
@@ -38,6 +70,7 @@ export class AuthController {
   /**
    * Login user
    * POST /api/auth/login
+   * Returns: AuthResponse with user, token, refreshToken
    */
   login = async (
     req: Request,
@@ -49,7 +82,13 @@ export class AuthController {
 
       const result = await this.authService.login(username, password);
 
-      res.status(200).json(result);
+      const response: AuthResponse = {
+        user: this.mapUserToResponse(result.user),
+        token: result.token,
+        refreshToken: result.refreshToken,
+      };
+
+      res.status(200).json(response);
     } catch (error) {
       next(error);
     }
@@ -58,6 +97,7 @@ export class AuthController {
   /**
    * Get current user info
    * GET /api/auth/me
+   * Returns: MeResponse with user object
    */
   me = async (
     req: AuthRequest,
@@ -72,7 +112,11 @@ export class AuthController {
 
       const user = await this.authService.getCurrentUser(userId);
 
-      res.status(200).json({ user });
+      const response: MeResponse = {
+        user: this.mapUserToResponse(user),
+      };
+
+      res.status(200).json(response);
     } catch (error) {
       next(error);
     }
@@ -81,6 +125,7 @@ export class AuthController {
   /**
    * Refresh access token
    * POST /api/auth/refresh
+   * Returns: RefreshResponse with new tokens and user
    */
   refresh = async (
     req: Request,
@@ -96,7 +141,13 @@ export class AuthController {
 
       const result = await this.authService.refreshAccessToken(refreshToken);
 
-      res.status(200).json(result);
+      const response: RefreshResponse = {
+        user: this.mapUserToResponse(result.user),
+        token: result.token,
+        refreshToken: result.refreshToken,
+      };
+
+      res.status(200).json(response);
     } catch (error) {
       next(error);
     }
