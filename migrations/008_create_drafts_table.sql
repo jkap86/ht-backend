@@ -15,8 +15,7 @@ CREATE TABLE IF NOT EXISTS drafts (
     completed_at TIMESTAMP,
     settings JSONB DEFAULT '{}', -- Additional draft settings
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(league_id) -- One draft per league
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Create indexes
