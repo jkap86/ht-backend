@@ -15,14 +15,14 @@ export class User {
    * Factory method to create User from database row
    */
   static fromDatabase(row: {
-    user_id: string;
+    id: string;
     username: string;
     password_hash: string;
     created_at: Date;
     updated_at: Date;
   }): User {
     return new User(
-      row.user_id,
+      row.id,
       row.username,
       row.password_hash,
       row.created_at,

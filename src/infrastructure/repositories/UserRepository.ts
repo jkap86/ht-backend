@@ -24,7 +24,7 @@ export class UserRepository implements IUserRepository {
 
   async findById(userId: string): Promise<User | null> {
     const result = await this.db.query(
-      'SELECT * FROM users WHERE user_id = $1',
+      'SELECT * FROM users WHERE id = $1',
       [userId]
     );
 
@@ -70,7 +70,7 @@ export class UserRepository implements IUserRepository {
     const result = await this.db.query(
       `UPDATE users
        SET ${setClauses.join(', ')}
-       WHERE user_id = $${paramIndex}
+       WHERE id = $${paramIndex}
        RETURNING *`,
       values
     );
@@ -83,7 +83,7 @@ export class UserRepository implements IUserRepository {
   }
 
   async delete(userId: string): Promise<void> {
-    await this.db.query('DELETE FROM users WHERE user_id = $1', [userId]);
+    await this.db.query('DELETE FROM users WHERE id = $1', [userId]);
   }
 
   async usernameExists(username: string): Promise<boolean> {
