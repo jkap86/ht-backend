@@ -1,10 +1,13 @@
 import { Pool } from 'pg';
 import { IUserRepository } from '../../domain/repositories/IUserRepository';
 import { ILeagueRepository } from '../../domain/repositories/ILeagueRepository';
+import { IRosterRepository } from '../../domain/repositories/IRosterRepository';
 import { UserRepository } from '../repositories/UserRepository';
 import { LeagueRepository } from '../repositories/LeagueRepository';
+import { RosterRepository } from '../repositories/RosterRepository';
 import { AuthService } from '../../application/services/AuthService';
 import { LeagueService } from '../../application/services/LeagueService';
+import { ChatService } from '../../application/services/ChatService';
 
 /**
  * Dependency Injection Container
@@ -17,10 +20,12 @@ export class Container {
   // Repositories
   private _userRepository?: IUserRepository;
   private _leagueRepository?: ILeagueRepository;
+  private _rosterRepository?: IRosterRepository;
 
   // Services
   private _authService?: AuthService;
   private _leagueService?: LeagueService;
+  private _chatService?: ChatService;
 
   private constructor(pool: Pool) {
     this.pool = pool;
@@ -67,6 +72,16 @@ export class Container {
   }
 
   /**
+   * Get Roster Repository
+   */
+  getRosterRepository(): IRosterRepository {
+    if (!this._rosterRepository) {
+      this._rosterRepository = new RosterRepository(this.pool);
+    }
+    return this._rosterRepository;
+  }
+
+  /**
    * Get Auth Service
    */
   getAuthService(): AuthService {
@@ -77,11 +92,26 @@ export class Container {
   }
 
   /**
+   * Get Chat Service
+   */
+  getChatService(): ChatService {
+    if (!this._chatService) {
+      this._chatService = new ChatService();
+    }
+    return this._chatService;
+  }
+
+  /**
    * Get League Service
    */
   getLeagueService(): LeagueService {
     if (!this._leagueService) {
-      this._leagueService = new LeagueService(this.getLeagueRepository());
+      this._leagueService = new LeagueService(
+        this.getLeagueRepository(),
+        this.getRosterRepository(),
+        this.getChatService(),
+        this.pool
+      );
     }
     return this._leagueService;
   }
@@ -92,7 +122,9 @@ export class Container {
   reset(): void {
     this._userRepository = undefined;
     this._leagueRepository = undefined;
+    this._rosterRepository = undefined;
     this._authService = undefined;
     this._leagueService = undefined;
+    this._chatService = undefined;
   }
 }

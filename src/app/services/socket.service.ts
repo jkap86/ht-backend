@@ -18,7 +18,7 @@ interface JoinDMData {
 interface ChatMessageData {
   id: number;
   league_id: number;
-  user_id: string;
+  user_id: string | null;
   username: string;
   message: string;
   message_type: string;
