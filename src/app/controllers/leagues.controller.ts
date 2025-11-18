@@ -3,7 +3,9 @@ import { Response, NextFunction } from "express";
 import { pool } from "../../db/pool";
 import { AuthRequest } from "../middleware/auth.middleware";
 import { NotFoundError, ValidationError } from "../utils/errors";
-import { sendSystemMessage } from "./leagueChat.controller";
+import { ChatService } from "../../application/services/ChatService";
+
+const chatService = new ChatService();
 
 interface LeagueRow {
   id: number;
@@ -197,7 +199,7 @@ export const joinLeague = async (
       [userId]
     );
     const username = userResult.rows[0]?.username || 'Unknown';
-    await sendSystemMessage(
+    await chatService.sendSystemMessage(
       leagueId,
       `${username} joined the league`,
       { event: 'user_joined', username, roster_id: nextRosterId }
@@ -292,7 +294,7 @@ export const createLeague = async (
       [userId]
     );
     const username = userResult.rows[0]?.username || 'Unknown';
-    await sendSystemMessage(
+    await chatService.sendSystemMessage(
       league.id,
       `${username} created the league "${name.trim()}"`,
       { event: 'league_created', league_name: name.trim(), creator: username }
@@ -416,7 +418,7 @@ export const updateLeague = async (
     }
 
     if (changes.length > 0) {
-      await sendSystemMessage(
+      await chatService.sendSystemMessage(
         leagueId,
         `${username} updated ${changes.join(', ')}`,
         { event: 'settings_updated', username, changes }
@@ -513,7 +515,7 @@ export const resetLeague = async (
         [userId]
       );
       const username = userResult.rows[0]?.username || 'Unknown';
-      await sendSystemMessage(
+      await chatService.sendSystemMessage(
         leagueId,
         `${username} reset the league`,
         { event: 'league_reset', username }
@@ -712,7 +714,7 @@ export const devAddUsersToLeague = async (
         );
 
         // Send system message to league chat
-        await sendSystemMessage(
+        await chatService.sendSystemMessage(
           leagueId,
           `${username} joined the league`,
           { event: 'user_joined', username, rosterId: nextRosterId }
@@ -882,7 +884,7 @@ export const toggleMemberPayment = async (
       const statusText = paid ? 'paid their dues' : 'marked as unpaid';
 
       // Send system message to league chat
-      await sendSystemMessage(
+      await chatService.sendSystemMessage(
         leagueId,
         `${memberUsername} ${statusText}`,
         { event: 'payment_status_changed', username: memberUsername, paid, rosterId }
