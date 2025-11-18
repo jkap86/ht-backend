@@ -94,4 +94,23 @@ export class UserRepository implements IUserRepository {
 
     return result.rows[0].exists;
   }
+
+  async searchByUsername(query: string, excludeUserId?: string): Promise<User[]> {
+    let sqlQuery = `
+      SELECT * FROM users
+      WHERE LOWER(username) LIKE LOWER($1)
+    `;
+    const params: any[] = [`%${query}%`];
+
+    if (excludeUserId) {
+      sqlQuery += ` AND id != $2`;
+      params.push(excludeUserId);
+    }
+
+    sqlQuery += ` ORDER BY username ASC`;
+
+    const result = await this.db.query(sqlQuery, params);
+
+    return result.rows.map((row) => User.fromDatabase(row));
+  }
 }

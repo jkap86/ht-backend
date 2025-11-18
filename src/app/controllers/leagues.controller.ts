@@ -1,37 +1,23 @@
 // src/app/controllers/leagues.controller.ts
-import { Response, NextFunction } from "express";
-import { pool } from "../../db/pool";
-import { AuthRequest } from "../middleware/auth.middleware";
-import { NotFoundError, ValidationError } from "../utils/errors";
-import { ChatService } from "../../application/services/ChatService";
+import { Response, NextFunction } from 'express';
+import { pool } from '../../db/pool';
+import { AuthRequest } from '../middleware/auth.middleware';
+import { ValidationError } from '../utils/errors';
+import { LeagueService } from '../../application/services/LeagueService';
+import { LeagueRepository } from '../../infrastructure/repositories/LeagueRepository';
+import { RosterRepository } from '../../infrastructure/repositories/RosterRepository';
+import { ChatService } from '../../application/services/ChatService';
 
+// Initialize service with dependencies
+const leagueRepo = new LeagueRepository(pool);
+const rosterRepo = new RosterRepository(pool);
 const chatService = new ChatService();
-
-interface LeagueRow {
-  id: number;
-  name: string;
-  status: string;
-  settings: any;
-  scoring_settings: any;
-  season: string;
-  season_type: string;
-  roster_positions: any;
-  total_rosters: number;
-  created_at: Date;
-  updated_at: Date;
-}
-
-interface RosterRow {
-  id: number;
-  league_id: number;
-  user_id: string;
-  roster_id: number;
-}
-
-interface LeagueResponse extends LeagueRow {
-  user_roster_id: number;
-  commissioner_roster_id: number | null;
-}
+const leagueService = new LeagueService(
+  leagueRepo,
+  rosterRepo,
+  chatService,
+  pool
+);
 
 /**
  * GET /api/leagues/my-leagues
@@ -46,28 +32,10 @@ export const getMyLeagues = async (
     const userId = req.user?.userId;
 
     if (!userId) {
-      throw new ValidationError("User ID not found in request");
+      throw new ValidationError('User ID not found in request');
     }
 
-    // Get all leagues where the user has a roster, including the user's roster_id
-    const result = await pool.query<LeagueRow & { user_roster_id: number }>(
-      `SELECT DISTINCT
-         l.id, l.name, l.status, l.settings, l.scoring_settings,
-         l.season, l.season_type, l.roster_positions, l.total_rosters,
-         l.created_at, l.updated_at,
-         r.roster_id as user_roster_id
-       FROM leagues l
-       INNER JOIN rosters r ON r.league_id = l.id
-       WHERE r.user_id = $1
-       ORDER BY l.created_at DESC`,
-      [userId]
-    );
-
-    // Extract commissioner_roster_id from settings and add it to top level for frontend
-    const leagues: LeagueResponse[] = result.rows.map((league): LeagueResponse => ({
-      ...league,
-      commissioner_roster_id: (league.settings as any)?.commissioner_roster_id ?? null,
-    }));
+    const leagues = await leagueService.getUserLeagues(userId);
 
     return res.status(200).json(leagues);
   } catch (error) {
@@ -88,34 +56,15 @@ export const getLeague = async (
     const leagueId = parseInt(req.params.id, 10);
     const userId = req.user?.userId;
 
+    if (!userId) {
+      throw new ValidationError('User ID not found in request');
+    }
+
     if (isNaN(leagueId)) {
-      throw new ValidationError("Invalid league ID");
+      throw new ValidationError('Invalid league ID');
     }
 
-    // Check if user has access to this league (has a roster in it)
-    const accessCheck = await pool.query<RosterRow>(
-      "SELECT id FROM rosters WHERE league_id = $1 AND user_id = $2",
-      [leagueId, userId]
-    );
-
-    if (accessCheck.rows.length === 0) {
-      throw new NotFoundError("League not found or access denied");
-    }
-
-    const result = await pool.query<LeagueRow>(
-      "SELECT * FROM leagues WHERE id = $1",
-      [leagueId]
-    );
-
-    if (result.rows.length === 0) {
-      throw new NotFoundError("League not found");
-    }
-
-    // Extract commissioner_roster_id from settings and add it to top level
-    const league = {
-      ...result.rows[0],
-      commissioner_roster_id: result.rows[0].settings?.commissioner_roster_id || null,
-    };
+    const league = await leagueService.getLeagueById(leagueId, userId);
 
     return res.status(200).json(league);
   } catch (error) {
@@ -137,77 +86,18 @@ export const joinLeague = async (
     const leagueId = parseInt(req.params.id, 10);
 
     if (!userId) {
-      throw new ValidationError("User ID not found in request");
+      throw new ValidationError('User ID not found in request');
     }
 
     if (isNaN(leagueId)) {
-      throw new ValidationError("Invalid league ID");
+      throw new ValidationError('Invalid league ID');
     }
 
-    // Check if league exists
-    const leagueResult = await pool.query<LeagueRow>(
-      "SELECT * FROM leagues WHERE id = $1",
-      [leagueId]
-    );
-
-    if (leagueResult.rows.length === 0) {
-      throw new NotFoundError("League not found");
-    }
-
-    const league = leagueResult.rows[0];
-
-    // Check if user is already in the league
-    const existingRoster = await pool.query<RosterRow>(
-      "SELECT id FROM rosters WHERE league_id = $1 AND user_id = $2",
-      [leagueId, userId]
-    );
-
-    if (existingRoster.rows.length > 0) {
-      throw new ValidationError("You are already a member of this league");
-    }
-
-    // Get the next available roster_id
-    const rosterCountResult = await pool.query<{ count: string }>(
-      "SELECT COUNT(*) as count FROM rosters WHERE league_id = $1",
-      [leagueId]
-    );
-
-    const rosterCount = parseInt(rosterCountResult.rows[0].count, 10);
-
-    // Check if league is full
-    if (rosterCount >= league.total_rosters) {
-      throw new ValidationError("This league is full");
-    }
-
-    const nextRosterId = rosterCount + 1;
-
-    // Check if league has dues - if free (dues = 0), automatically mark as paid
-    const dues = (league.settings?.dues as number) || 0;
-    const autoMarkPaid = dues === 0;
-    const rosterSettings = autoMarkPaid ? { paid: true } : {};
-
-    // Add user to league
-    await pool.query(
-      `INSERT INTO rosters (league_id, user_id, roster_id, settings)
-       VALUES ($1, $2, $3, $4)`,
-      [leagueId, userId, nextRosterId, JSON.stringify(rosterSettings)]
-    );
-
-    // Send system message to league chat
-    const userResult = await pool.query(
-      "SELECT username FROM users WHERE id = $1",
-      [userId]
-    );
-    const username = userResult.rows[0]?.username || 'Unknown';
-    await chatService.sendSystemMessage(
-      leagueId,
-      `${username} joined the league`,
-      { event: 'user_joined', username, roster_id: nextRosterId }
-    );
+    const result = await leagueService.joinLeague(leagueId, userId);
 
     return res.status(200).json({
-      message: "Successfully joined league",
-      roster_id: nextRosterId,
+      message: result.message,
+      roster_id: result.roster.roster_id,
     });
   } catch (error) {
     next(error);
@@ -232,81 +122,46 @@ export const createLeague = async (
       settings = {},
       scoring_settings = {},
       roster_positions = [],
-      season_type = "regular",
+      season_type = 'regular',
+      description,
     } = req.body;
 
-    // Validation
-    if (!name || typeof name !== "string" || name.trim().length === 0) {
-      throw new ValidationError("League name is required");
+    if (!userId) {
+      throw new ValidationError('User ID not found in request');
     }
 
-    if (!season || typeof season !== "string" || !/^\d{4}$/.test(season)) {
-      throw new ValidationError("Valid season year is required (e.g., 2024)");
+    // Validation
+    if (!name || typeof name !== 'string' || name.trim().length === 0) {
+      throw new ValidationError('League name is required');
+    }
+
+    if (!season || typeof season !== 'string' || !/^\d{4}$/.test(season)) {
+      throw new ValidationError('Valid season year is required (e.g., 2024)');
     }
 
     if (
-      typeof total_rosters !== "number" ||
+      typeof total_rosters !== 'number' ||
       total_rosters < 2 ||
       total_rosters > 20
     ) {
-      throw new ValidationError("Total rosters must be between 2 and 20");
+      throw new ValidationError('Total rosters must be between 2 and 20');
     }
 
-    // Add commissioner_roster_id to settings (creator is always roster_id 1)
-    const settingsWithCommissioner = {
-      ...settings,
-      commissioner_roster_id: 1,
-    };
-
-    // Create the league
-    const leagueResult = await pool.query<LeagueRow>(
-      `INSERT INTO leagues (name, season, total_rosters, settings, scoring_settings, roster_positions, season_type, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'pre_draft')
-       RETURNING *`,
-      [
-        name.trim(),
+    const league = await leagueService.createLeague(
+      {
+        name: name.trim(),
+        description,
+        totalRosters: total_rosters,
         season,
-        total_rosters,
-        JSON.stringify(settingsWithCommissioner),
-        JSON.stringify(scoring_settings),
-        JSON.stringify(roster_positions),
-        season_type,
-      ]
+        seasonType: season_type,
+        settings,
+        scoringSettings: scoring_settings,
+        rosterPositions: roster_positions,
+      },
+      userId
     );
 
-    const league = leagueResult.rows[0];
-
-    // Check if league has dues - if free (dues = 0), automatically mark as paid
-    const dues = (settingsWithCommissioner.dues as number) || 0;
-    const autoMarkPaid = dues === 0;
-    const rosterSettings = autoMarkPaid ? { paid: true } : {};
-
-    // Create a roster for the league creator (roster_id = 1, who is also the commissioner)
-    await pool.query(
-      `INSERT INTO rosters (league_id, user_id, roster_id, settings)
-       VALUES ($1, $2, $3, $4)`,
-      [league.id, userId, 1, JSON.stringify(rosterSettings)]
-    );
-
-    // Send system message to league chat
-    const userResult = await pool.query(
-      "SELECT username FROM users WHERE id = $1",
-      [userId]
-    );
-    const username = userResult.rows[0]?.username || 'Unknown';
-    await chatService.sendSystemMessage(
-      league.id,
-      `${username} created the league "${name.trim()}"`,
-      { event: 'league_created', league_name: name.trim(), creator: username }
-    );
-
-    // Return league with commissioner_roster_id at top level for frontend
-    const leagueWithCommissioner = {
-      ...league,
-      commissioner_roster_id: 1,
-    };
-
-    return res.status(201).json(leagueWithCommissioner);
+    return res.status(201).json(league);
   } catch (error) {
     next(error);
   }
@@ -326,111 +181,32 @@ export const updateLeague = async (
     const leagueId = parseInt(req.params.id, 10);
 
     if (!userId) {
-      throw new ValidationError("User ID not found in request");
+      throw new ValidationError('User ID not found in request');
     }
 
     if (isNaN(leagueId)) {
-      throw new ValidationError("Invalid league ID");
+      throw new ValidationError('Invalid league ID');
     }
 
-    // Check if league exists
-    const leagueResult = await pool.query<LeagueRow>(
-      "SELECT * FROM leagues WHERE id = $1",
-      [leagueId]
+    // Build updates object
+    const updates: any = {};
+    if (req.body.name) updates.name = req.body.name;
+    if (req.body.settings) updates.settings = req.body.settings;
+    if (req.body.scoring_settings)
+      updates.scoringSettings = req.body.scoring_settings;
+    if (req.body.roster_positions)
+      updates.rosterPositions = req.body.roster_positions;
+    if (req.body.status) updates.status = req.body.status;
+
+    if (Object.keys(updates).length === 0) {
+      throw new ValidationError('No updates provided');
+    }
+
+    const updatedLeague = await leagueService.updateLeague(
+      leagueId,
+      userId,
+      updates
     );
-
-    if (leagueResult.rows.length === 0) {
-      throw new NotFoundError("League not found");
-    }
-
-    const league = leagueResult.rows[0];
-
-    // Check if user is commissioner
-    const commissionerRosterId = league.settings?.commissioner_roster_id;
-    const userRoster = await pool.query<RosterRow>(
-      "SELECT roster_id FROM rosters WHERE league_id = $1 AND user_id = $2",
-      [leagueId, userId]
-    );
-
-    if (userRoster.rows.length === 0) {
-      throw new NotFoundError("You are not a member of this league");
-    }
-
-    if (userRoster.rows[0].roster_id !== commissionerRosterId) {
-      throw new ValidationError("Only the commissioner can update league settings");
-    }
-
-    // Build update query
-    const updates: string[] = [];
-    const values: any[] = [];
-    let paramIndex = 1;
-
-    if (req.body.name) {
-      updates.push(`name = $${paramIndex++}`);
-      values.push(req.body.name);
-    }
-
-    if (req.body.settings) {
-      updates.push(`settings = $${paramIndex++}`);
-      values.push(JSON.stringify(req.body.settings));
-    }
-
-    if (req.body.scoring_settings) {
-      updates.push(`scoring_settings = $${paramIndex++}`);
-      values.push(JSON.stringify(req.body.scoring_settings));
-    }
-
-    if (req.body.status) {
-      updates.push(`status = $${paramIndex++}`);
-      values.push(req.body.status);
-    }
-
-    if (updates.length === 0) {
-      throw new ValidationError("No updates provided");
-    }
-
-    updates.push(`updated_at = CURRENT_TIMESTAMP`);
-    values.push(leagueId);
-
-    // Update the league
-    const result = await pool.query<LeagueRow>(
-      `UPDATE leagues SET ${updates.join(", ")} WHERE id = $${paramIndex} RETURNING *`,
-      values
-    );
-
-    // Send system message to league chat
-    const userResult = await pool.query(
-      "SELECT username FROM users WHERE id = $1",
-      [userId]
-    );
-    const username = userResult.rows[0]?.username || 'Unknown';
-
-    // Create a meaningful message about what changed
-    const changes = [];
-    if (req.body.name && req.body.name !== league.name) {
-      changes.push(`league name to "${req.body.name}"`);
-    }
-    if (req.body.status && req.body.status !== league.status) {
-      changes.push(`status to "${req.body.status}"`);
-    }
-    if (req.body.settings || req.body.scoring_settings) {
-      changes.push('league settings');
-    }
-
-    if (changes.length > 0) {
-      await chatService.sendSystemMessage(
-        leagueId,
-        `${username} updated ${changes.join(', ')}`,
-        { event: 'settings_updated', username, changes }
-      );
-    }
-
-    // Return updated league with user_roster_id
-    const updatedLeague = {
-      ...result.rows[0],
-      commissioner_roster_id: result.rows[0].settings?.commissioner_roster_id || null,
-      user_roster_id: userRoster.rows[0].roster_id,
-    };
 
     return res.status(200).json(updatedLeague);
   } catch (error) {
@@ -452,82 +228,16 @@ export const resetLeague = async (
     const leagueId = parseInt(req.params.id, 10);
 
     if (!userId) {
-      throw new ValidationError("User ID not found in request");
+      throw new ValidationError('User ID not found in request');
     }
 
     if (isNaN(leagueId)) {
-      throw new ValidationError("Invalid league ID");
+      throw new ValidationError('Invalid league ID');
     }
 
-    // Check if league exists
-    const leagueResult = await pool.query<LeagueRow>(
-      "SELECT * FROM leagues WHERE id = $1",
-      [leagueId]
-    );
+    const result = await leagueService.resetLeague(leagueId, userId);
 
-    if (leagueResult.rows.length === 0) {
-      throw new NotFoundError("League not found");
-    }
-
-    const league = leagueResult.rows[0];
-
-    // Check if user is commissioner
-    const commissionerRosterId = league.settings?.commissioner_roster_id;
-    const userRoster = await pool.query<RosterRow>(
-      "SELECT roster_id FROM rosters WHERE league_id = $1 AND user_id = $2",
-      [leagueId, userId]
-    );
-
-    if (userRoster.rows.length === 0) {
-      throw new NotFoundError("You are not a member of this league");
-    }
-
-    if (userRoster.rows[0].roster_id !== commissionerRosterId) {
-      throw new ValidationError("Only the commissioner can reset the league");
-    }
-
-    // Start transaction
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
-
-      // Delete all rosters except the commissioner's
-      await client.query(
-        "DELETE FROM rosters WHERE league_id = $1 AND roster_id != $2",
-        [leagueId, commissionerRosterId]
-      );
-
-      // TODO: When draft tables exist, delete draft picks
-      // TODO: When matchup tables exist, delete matchups
-      // TODO: When player_roster tables exist, clear rosters
-
-      // Reset league status to pre_draft
-      await client.query(
-        "UPDATE leagues SET status = 'pre_draft', updated_at = CURRENT_TIMESTAMP WHERE id = $1",
-        [leagueId]
-      );
-
-      await client.query('COMMIT');
-
-      // Send system message to league chat
-      const userResult = await pool.query(
-        "SELECT username FROM users WHERE id = $1",
-        [userId]
-      );
-      const username = userResult.rows[0]?.username || 'Unknown';
-      await chatService.sendSystemMessage(
-        leagueId,
-        `${username} reset the league`,
-        { event: 'league_reset', username }
-      );
-
-      return res.status(200).json({ message: "League reset successfully" });
-    } catch (error) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
-    }
+    return res.status(200).json(result);
   } catch (error) {
     next(error);
   }
@@ -547,79 +257,16 @@ export const deleteLeague = async (
     const leagueId = parseInt(req.params.id, 10);
 
     if (!userId) {
-      throw new ValidationError("User ID not found in request");
+      throw new ValidationError('User ID not found in request');
     }
 
     if (isNaN(leagueId)) {
-      throw new ValidationError("Invalid league ID");
+      throw new ValidationError('Invalid league ID');
     }
 
-    // Check if league exists
-    const leagueResult = await pool.query<LeagueRow>(
-      "SELECT * FROM leagues WHERE id = $1",
-      [leagueId]
-    );
+    await leagueService.deleteLeague(leagueId, userId);
 
-    if (leagueResult.rows.length === 0) {
-      throw new NotFoundError("League not found");
-    }
-
-    const league = leagueResult.rows[0];
-
-    // Check if user is commissioner
-    const commissionerRosterId = league.settings?.commissioner_roster_id;
-    const userRoster = await pool.query<RosterRow>(
-      "SELECT roster_id FROM rosters WHERE league_id = $1 AND user_id = $2",
-      [leagueId, userId]
-    );
-
-    if (userRoster.rows.length === 0) {
-      throw new NotFoundError("You are not a member of this league");
-    }
-
-    if (userRoster.rows[0].roster_id !== commissionerRosterId) {
-      throw new ValidationError("Only the commissioner can delete the league");
-    }
-
-    // Start transaction
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
-
-      // Delete all chat messages
-      await client.query(
-        "DELETE FROM league_chat_messages WHERE league_id = $1",
-        [leagueId]
-      );
-
-      // Delete all rosters
-      await client.query(
-        "DELETE FROM rosters WHERE league_id = $1",
-        [leagueId]
-      );
-
-      // TODO: When other tables exist, delete:
-      // - draft picks
-      // - matchups
-      // - player rosters
-      // - trades
-      // - waiver claims
-
-      // Delete the league
-      await client.query(
-        "DELETE FROM leagues WHERE id = $1",
-        [leagueId]
-      );
-
-      await client.query('COMMIT');
-
-      return res.status(200).json({ message: "League deleted successfully" });
-    } catch (error) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
-    }
+    return res.status(200).json({ message: 'League deleted successfully' });
   } catch (error) {
     next(error);
   }
@@ -635,96 +282,27 @@ export const devAddUsersToLeague = async (
   next: NextFunction
 ) => {
   try {
+    const userId = req.user?.userId;
     const leagueId = parseInt(req.params.id, 10);
     const { usernames } = req.body;
 
+    if (!userId) {
+      throw new ValidationError('User ID not found in request');
+    }
+
     if (isNaN(leagueId)) {
-      throw new ValidationError("Invalid league ID");
+      throw new ValidationError('Invalid league ID');
     }
 
     if (!Array.isArray(usernames) || usernames.length === 0) {
-      throw new ValidationError("usernames must be a non-empty array");
+      throw new ValidationError('usernames must be a non-empty array');
     }
 
-    // Check if league exists
-    const leagueResult = await pool.query<LeagueRow>(
-      "SELECT * FROM leagues WHERE id = $1",
-      [leagueId]
+    const results = await leagueService.bulkAddUsers(
+      leagueId,
+      usernames,
+      userId
     );
-
-    if (leagueResult.rows.length === 0) {
-      throw new NotFoundError("League not found");
-    }
-
-    const league = leagueResult.rows[0];
-    const results = [];
-
-    for (const username of usernames) {
-      try {
-        // Get user ID from username
-        const userResult = await pool.query<{ id: string }>(
-          "SELECT id FROM users WHERE username = $1",
-          [username]
-        );
-
-        if (userResult.rows.length === 0) {
-          results.push({ username, success: false, error: "User not found" });
-          continue;
-        }
-
-        const userId = userResult.rows[0].id;
-
-        // Check if user is already in the league
-        const existingRoster = await pool.query<RosterRow>(
-          "SELECT id FROM rosters WHERE league_id = $1 AND user_id = $2",
-          [leagueId, userId]
-        );
-
-        if (existingRoster.rows.length > 0) {
-          results.push({ username, success: false, error: "Already in league" });
-          continue;
-        }
-
-        // Get the next available roster_id
-        const rosterCountResult = await pool.query<{ count: string }>(
-          "SELECT COUNT(*) as count FROM rosters WHERE league_id = $1",
-          [leagueId]
-        );
-
-        const rosterCount = parseInt(rosterCountResult.rows[0].count, 10);
-
-        // Check if league is full
-        if (rosterCount >= league.total_rosters) {
-          results.push({ username, success: false, error: "League is full" });
-          continue;
-        }
-
-        const nextRosterId = rosterCount + 1;
-
-        // Check if league has dues - if free (dues = 0), automatically mark as paid
-        const dues = (league.settings?.dues as number) || 0;
-        const autoMarkPaid = dues === 0;
-        const rosterSettings = autoMarkPaid ? { paid: true } : {};
-
-        // Add user to league
-        await pool.query(
-          `INSERT INTO rosters (league_id, user_id, roster_id, settings)
-           VALUES ($1, $2, $3, $4)`,
-          [leagueId, userId, nextRosterId, JSON.stringify(rosterSettings)]
-        );
-
-        // Send system message to league chat
-        await chatService.sendSystemMessage(
-          leagueId,
-          `${username} joined the league`,
-          { event: 'user_joined', username, rosterId: nextRosterId }
-        );
-
-        results.push({ username, success: true, rosterId: nextRosterId });
-      } catch (error) {
-        results.push({ username, success: false, error: String(error) });
-      }
-    }
 
     return res.status(200).json({ results });
   } catch (error) {
@@ -746,57 +324,16 @@ export const getLeagueMembers = async (
     const leagueId = parseInt(req.params.id, 10);
 
     if (!userId) {
-      throw new ValidationError("User ID not found in request");
+      throw new ValidationError('User ID not found in request');
     }
 
     if (isNaN(leagueId)) {
-      throw new ValidationError("Invalid league ID");
+      throw new ValidationError('Invalid league ID');
     }
 
-    // Check if user is a member of this league
-    const userRoster = await pool.query<RosterRow>(
-      "SELECT id FROM rosters WHERE league_id = $1 AND user_id = $2",
-      [leagueId, userId]
-    );
+    const members = await leagueService.getLeagueMembers(leagueId, userId);
 
-    if (userRoster.rows.length === 0) {
-      throw new NotFoundError("You are not a member of this league");
-    }
-
-    // Get league info to check if it's free
-    const leagueResult = await pool.query<LeagueRow>(
-      "SELECT settings FROM leagues WHERE id = $1",
-      [leagueId]
-    );
-
-    const league = leagueResult.rows[0];
-    const dues = (league?.settings?.dues as number) || 0;
-    const isFreeLeague = dues === 0;
-
-    // Get all league members with their usernames and payment status
-    const members = await pool.query(
-      `SELECT
-        r.id as roster_id,
-        r.roster_id as roster_number,
-        r.settings,
-        u.id as user_id,
-        u.username
-      FROM rosters r
-      JOIN users u ON r.user_id = u.id
-      WHERE r.league_id = $1
-      ORDER BY r.roster_id ASC`,
-      [leagueId]
-    );
-
-    const membersWithPayment = members.rows.map(row => ({
-      rosterId: row.roster_number,
-      userId: row.user_id,
-      username: row.username,
-      // If league is free, everyone is automatically paid
-      paid: isFreeLeague ? true : (row.settings?.paid === true || false),
-    }));
-
-    return res.status(200).json({ members: membersWithPayment });
+    return res.status(200).json({ members });
   } catch (error) {
     next(error);
   }
@@ -818,82 +355,27 @@ export const toggleMemberPayment = async (
     const { paid } = req.body;
 
     if (!userId) {
-      throw new ValidationError("User ID not found in request");
+      throw new ValidationError('User ID not found in request');
     }
 
     if (isNaN(leagueId) || isNaN(rosterId)) {
-      throw new ValidationError("Invalid league ID or roster ID");
+      throw new ValidationError('Invalid league ID or roster ID');
     }
 
     if (typeof paid !== 'boolean') {
-      throw new ValidationError("paid must be a boolean");
+      throw new ValidationError('paid must be a boolean');
     }
 
-    // Check if league exists and get commissioner info
-    const leagueResult = await pool.query<LeagueRow>(
-      "SELECT * FROM leagues WHERE id = $1",
-      [leagueId]
+    const updatedRoster = await leagueService.updatePaymentStatus(
+      leagueId,
+      rosterId,
+      paid,
+      userId
     );
-
-    if (leagueResult.rows.length === 0) {
-      throw new NotFoundError("League not found");
-    }
-
-    const league = leagueResult.rows[0];
-
-    // Check if user is commissioner
-    const commissionerRosterId = league.settings?.commissioner_roster_id;
-    const userRoster = await pool.query<RosterRow>(
-      "SELECT roster_id FROM rosters WHERE league_id = $1 AND user_id = $2",
-      [leagueId, userId]
-    );
-
-    if (userRoster.rows.length === 0) {
-      throw new NotFoundError("You are not a member of this league");
-    }
-
-    if (userRoster.rows[0].roster_id !== commissionerRosterId) {
-      throw new ValidationError("Only the commissioner can update payment status");
-    }
-
-    // Update the payment status
-    const updateResult = await pool.query(
-      `UPDATE rosters
-       SET settings = COALESCE(settings, '{}'::jsonb) || jsonb_build_object('paid', $1::boolean),
-           updated_at = CURRENT_TIMESTAMP
-       WHERE league_id = $2 AND roster_id = $3
-       RETURNING roster_id, settings`,
-      [paid, leagueId, rosterId]
-    );
-
-    if (updateResult.rows.length === 0) {
-      throw new NotFoundError("Roster not found");
-    }
-
-    // Get the username of the member whose payment status was updated
-    const memberResult = await pool.query(
-      `SELECT u.username
-       FROM rosters r
-       JOIN users u ON r.user_id = u.id
-       WHERE r.league_id = $1 AND r.roster_id = $2`,
-      [leagueId, rosterId]
-    );
-
-    if (memberResult.rows.length > 0) {
-      const memberUsername = memberResult.rows[0].username;
-      const statusText = paid ? 'paid their dues' : 'marked as unpaid';
-
-      // Send system message to league chat
-      await chatService.sendSystemMessage(
-        leagueId,
-        `${memberUsername} ${statusText}`,
-        { event: 'payment_status_changed', username: memberUsername, paid, rosterId }
-      );
-    }
 
     return res.status(200).json({
-      rosterId: updateResult.rows[0].roster_id,
-      paid: updateResult.rows[0].settings.paid,
+      rosterId: updatedRoster.roster_id,
+      paid: (updatedRoster.settings as any).paid,
     });
   } catch (error) {
     next(error);

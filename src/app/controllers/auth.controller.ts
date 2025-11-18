@@ -152,6 +152,40 @@ export class AuthController {
       next(error);
     }
   };
+
+  /**
+   * Search for users by username
+   * GET /api/auth/users/search?q=<query>
+   * Returns: Array of UserResponse matching the search query (excludes current user)
+   */
+  searchUsers = async (
+    req: AuthRequest,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
+    try {
+      const userId = req.user?.userId;
+      if (!userId) {
+        return next(new Error('User ID not found'));
+      }
+
+      const query = req.query.q as string;
+      if (!query || query.trim().length === 0) {
+        res.status(200).json([]);
+        return;
+      }
+
+      const users = await this.authService.searchUsers(query.trim(), userId);
+
+      const response: UserResponse[] = users.map((user) =>
+        this.mapUserToResponse(user)
+      );
+
+      res.status(200).json(response);
+    } catch (error) {
+      next(error);
+    }
+  };
 }
 
 // Export singleton instance
@@ -162,3 +196,4 @@ export const register = authController.register;
 export const login = authController.login;
 export const me = authController.me;
 export const refresh = authController.refresh;
+export const searchUsers = authController.searchUsers;

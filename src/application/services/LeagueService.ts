@@ -1,8 +1,16 @@
+import { Pool, PoolClient } from 'pg';
 import { League } from '../../domain/models/League';
 import {
   ILeagueRepository,
   CreateLeagueParams,
+  LeagueWithCommissioner,
 } from '../../domain/repositories/ILeagueRepository';
+import {
+  IRosterRepository,
+  Roster,
+  LeagueMember,
+} from '../../domain/repositories/IRosterRepository';
+import { ChatService } from './ChatService';
 import {
   ValidationException,
   NotFoundException,
@@ -13,44 +21,52 @@ import {
  * Contains all business logic for leagues
  */
 export class LeagueService {
-  constructor(private readonly leagueRepository: ILeagueRepository) {}
+  constructor(
+    private readonly leagueRepository: ILeagueRepository,
+    private readonly rosterRepository: IRosterRepository,
+    private readonly chatService: ChatService,
+    private readonly db: Pool
+  ) {}
 
   /**
-   * Get leagues for a user
+   * Get leagues for a user with roster info
    */
   async getUserLeagues(userId: string): Promise<League[]> {
     return await this.leagueRepository.findByUserId(userId);
   }
 
   /**
-   * Get league by ID
+   * Get league by ID with commissioner and user roster info
    */
   async getLeagueById(
     leagueId: number,
-    userId?: string
-  ): Promise<League> {
-    const league = await this.leagueRepository.findById(leagueId);
+    userId: string
+  ): Promise<LeagueWithCommissioner> {
+    const league = await this.leagueRepository.findByIdWithCommissioner(
+      leagueId,
+      userId
+    );
 
     if (!league) {
       throw new NotFoundException(`League not found: ${leagueId}`);
     }
 
-    // If userId provided, verify they're a member (optional check)
-    if (userId) {
-      const isMember = await this.leagueRepository.isUserMember(
-        leagueId,
-        userId
-      );
-      // You might want to throw error or just log - depends on business rules
+    // Verify user is a member
+    const isMember = await this.leagueRepository.isUserMember(leagueId, userId);
+    if (!isMember) {
+      throw new NotFoundException('League not found or access denied');
     }
 
     return league;
   }
 
   /**
-   * Create a new league
+   * Create a new league and make the creator the commissioner
    */
-  async createLeague(params: CreateLeagueParams): Promise<League> {
+  async createLeague(
+    params: CreateLeagueParams,
+    userId: string
+  ): Promise<LeagueWithCommissioner> {
     // Validate name
     if (!params.name || params.name.trim().length < 3) {
       throw new ValidationException(
@@ -65,7 +81,7 @@ export class LeagueService {
       );
     }
 
-    // Validate season format (basic check)
+    // Validate season format
     const currentYear = new Date().getFullYear();
     const seasonYear = parseInt(params.season);
     if (
@@ -77,7 +93,104 @@ export class LeagueService {
     }
 
     // Create league
-    return await this.leagueRepository.create(params);
+    const league = await this.leagueRepository.create(params);
+
+    // Get username for system message
+    const username = await this.rosterRepository.getUsernameById(userId);
+    if (!username) {
+      throw new ValidationException('User not found');
+    }
+
+    // Create commissioner roster with roster_id = 1
+    const commissionerRoster = await this.rosterRepository.create({
+      leagueId: league.id,
+      userId,
+      rosterId: 1,
+      settings: {},
+    });
+
+    // Update league with commissioner roster ID
+    await this.leagueRepository.updateCommissionerRosterId(
+      league.id,
+      commissionerRoster.roster_id
+    );
+
+    // Send system message
+    await this.chatService.sendSystemMessage(
+      league.id,
+      `${username} created the league`,
+      { event: 'league_created', username }
+    );
+
+    // Return league with commissioner info
+    const leagueWithCommissioner =
+      await this.leagueRepository.findByIdWithCommissioner(league.id, userId);
+
+    if (!leagueWithCommissioner) {
+      throw new Error('Failed to retrieve created league');
+    }
+
+    return leagueWithCommissioner;
+  }
+
+  /**
+   * Join a league
+   */
+  async joinLeague(
+    leagueId: number,
+    userId: string
+  ): Promise<{ roster: Roster; message: string }> {
+    // Verify league exists
+    const league = await this.leagueRepository.findById(leagueId);
+    if (!league) {
+      throw new NotFoundException('League not found');
+    }
+
+    // Check if already a member
+    const existingRoster = await this.rosterRepository.findByLeagueAndUser(
+      leagueId,
+      userId
+    );
+    if (existingRoster) {
+      throw new ValidationException('You are already a member of this league');
+    }
+
+    // Check if league is full
+    const currentMemberCount =
+      await this.rosterRepository.countByLeagueId(leagueId);
+    if (currentMemberCount >= league.totalRosters) {
+      throw new ValidationException('League is full');
+    }
+
+    // Get next roster ID
+    const nextRosterId =
+      await this.rosterRepository.getNextRosterId(leagueId);
+
+    // Get username for system message
+    const username = await this.rosterRepository.getUsernameById(userId);
+    if (!username) {
+      throw new ValidationException('User not found');
+    }
+
+    // Create roster
+    const roster = await this.rosterRepository.create({
+      leagueId,
+      userId,
+      rosterId: nextRosterId,
+      settings: {},
+    });
+
+    // Send system message
+    await this.chatService.sendSystemMessage(
+      leagueId,
+      `${username} joined the league`,
+      { event: 'user_joined', username, roster_id: nextRosterId }
+    );
+
+    return {
+      roster,
+      message: 'Successfully joined league',
+    };
   }
 
   /**
@@ -88,14 +201,8 @@ export class LeagueService {
     userId: string,
     updates: Partial<League>
   ): Promise<League> {
-    // Verify league exists
+    // Verify league exists and user is member
     const league = await this.getLeagueById(leagueId, userId);
-
-    // Verify user is a member (business rule)
-    const isMember = await this.leagueRepository.isUserMember(leagueId, userId);
-    if (!isMember) {
-      throw new ValidationException('You are not a member of this league');
-    }
 
     // Validate status if being updated
     if (updates.status && !League.isValidStatus(updates.status)) {
@@ -104,13 +211,239 @@ export class LeagueService {
       );
     }
 
-    // Business rule: Can only edit settings before draft starts
-    if (league.isDrafting() || league.isActive()) {
-      // You might want to restrict certain updates
-      // For now, we'll allow all updates
+    // Get username for system message
+    const username = await this.rosterRepository.getUsernameById(userId);
+
+    // Track changes for system message
+    const changes: string[] = [];
+    if (updates.name && updates.name !== league.name) {
+      changes.push(`name to "${updates.name}"`);
+    }
+    if (updates.status && updates.status !== league.status) {
+      changes.push(`status to "${updates.status}"`);
     }
 
-    return await this.leagueRepository.update(leagueId, updates);
+    // Update league
+    const updatedLeague = await this.leagueRepository.update(leagueId, updates);
+
+    // Send system message if there were changes
+    if (changes.length > 0 && username) {
+      await this.chatService.sendSystemMessage(
+        leagueId,
+        `${username} updated league ${changes.join(', ')}`,
+        { event: 'league_updated', username, changes }
+      );
+    }
+
+    return updatedLeague;
+  }
+
+  /**
+   * Reset league (delete all rosters, draft picks, reset status)
+   */
+  async resetLeague(
+    leagueId: number,
+    userId: string
+  ): Promise<{ message: string }> {
+    // Verify league exists and user is member
+    await this.getLeagueById(leagueId, userId);
+
+    // Get username for system message
+    const username = await this.rosterRepository.getUsernameById(userId);
+
+    // Use transaction for atomicity
+    const client = await this.db.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Create a temporary repository instance using the client
+      // This ensures all operations happen within the transaction
+      await client.query('DELETE FROM rosters WHERE league_id = $1', [
+        leagueId,
+      ]);
+      await client.query('DELETE FROM draft_picks WHERE league_id = $1', [
+        leagueId,
+      ]);
+      await client.query(
+        `UPDATE leagues
+         SET status = 'pre_draft',
+             commissioner_roster_id = NULL,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $1`,
+        [leagueId]
+      );
+
+      await client.query('COMMIT');
+
+      // Send system message after successful reset
+      if (username) {
+        await this.chatService.sendSystemMessage(
+          leagueId,
+          `${username} reset the league`,
+          { event: 'league_reset', username }
+        );
+      }
+
+      return { message: 'League reset successfully' };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Get league members
+   */
+  async getLeagueMembers(
+    leagueId: number,
+    userId: string
+  ): Promise<LeagueMember[]> {
+    // Verify league exists and user is member
+    await this.getLeagueById(leagueId, userId);
+
+    return await this.rosterRepository.getLeagueMembers(leagueId);
+  }
+
+  /**
+   * Bulk add users to league
+   */
+  async bulkAddUsers(
+    leagueId: number,
+    usernames: string[],
+    userId: string
+  ): Promise<Array<{ username: string; success: boolean; message: string }>> {
+    // Verify league exists and user is member
+    const league = await this.getLeagueById(leagueId, userId);
+
+    // Validate league not full
+    const currentMemberCount =
+      await this.rosterRepository.countByLeagueId(leagueId);
+    const availableSlots = league.totalRosters - currentMemberCount;
+
+    if (availableSlots === 0) {
+      throw new ValidationException('League is full');
+    }
+
+    if (usernames.length > availableSlots) {
+      throw new ValidationException(
+        `Cannot add ${usernames.length} users. Only ${availableSlots} slots available.`
+      );
+    }
+
+    // Find users by usernames
+    const users = await this.rosterRepository.findUsersByUsernames(usernames);
+    const userMap = new Map(users.map((u) => [u.username, u.id]));
+
+    const results: Array<{
+      username: string;
+      success: boolean;
+      message: string;
+    }> = [];
+
+    for (const username of usernames) {
+      const targetUserId = userMap.get(username);
+
+      if (!targetUserId) {
+        results.push({
+          username,
+          success: false,
+          message: 'User not found',
+        });
+        continue;
+      }
+
+      // Check if already member
+      const existingRoster = await this.rosterRepository.findByLeagueAndUser(
+        leagueId,
+        targetUserId
+      );
+      if (existingRoster) {
+        results.push({
+          username,
+          success: false,
+          message: 'Already a member',
+        });
+        continue;
+      }
+
+      // Get next roster ID
+      const nextRosterId =
+        await this.rosterRepository.getNextRosterId(leagueId);
+
+      // Create roster
+      await this.rosterRepository.create({
+        leagueId,
+        userId: targetUserId,
+        rosterId: nextRosterId,
+        settings: {},
+      });
+
+      // Send system message
+      await this.chatService.sendSystemMessage(
+        leagueId,
+        `${username} was added to the league`,
+        { event: 'user_added', username, roster_id: nextRosterId }
+      );
+
+      results.push({
+        username,
+        success: true,
+        message: 'Added successfully',
+      });
+    }
+
+    return results;
+  }
+
+  /**
+   * Update member payment status
+   */
+  async updatePaymentStatus(
+    leagueId: number,
+    rosterId: number,
+    paid: boolean,
+    userId: string
+  ): Promise<Roster> {
+    // Verify league exists and user is member
+    await this.getLeagueById(leagueId, userId);
+
+    // Get the roster
+    const roster = await this.rosterRepository.findByLeagueAndRosterId(
+      leagueId,
+      rosterId
+    );
+    if (!roster) {
+      throw new NotFoundException('Roster not found');
+    }
+
+    // Update settings
+    const updatedSettings = {
+      ...roster.settings,
+      paid,
+    };
+
+    const updatedRoster = await this.rosterRepository.updateSettings(
+      leagueId,
+      rosterId,
+      updatedSettings
+    );
+
+    // Get member username for system message
+    const memberUsername = await this.rosterRepository.getUsernameById(
+      roster.user_id
+    );
+
+    if (memberUsername) {
+      await this.chatService.sendSystemMessage(
+        leagueId,
+        `${memberUsername}'s payment status updated to ${paid ? 'paid' : 'unpaid'}`,
+        { event: 'payment_updated', username: memberUsername, paid }
+      );
+    }
+
+    return updatedRoster;
   }
 
   /**
@@ -125,7 +458,10 @@ export class LeagueService {
    */
   async deleteLeague(leagueId: number, userId: string): Promise<void> {
     // Verify league exists
-    await this.getLeagueById(leagueId);
+    const league = await this.leagueRepository.findById(leagueId);
+    if (!league) {
+      throw new NotFoundException('League not found');
+    }
 
     // Verify user is a member
     const isMember = await this.leagueRepository.isUserMember(leagueId, userId);
@@ -134,8 +470,7 @@ export class LeagueService {
     }
 
     // Business rule: Can only delete leagues that haven't started
-    const league = await this.leagueRepository.findById(leagueId);
-    if (league && (league.isDrafting() || league.isActive())) {
+    if (league.isDrafting() || league.isActive()) {
       throw new ValidationException(
         'Cannot delete league that has already started'
       );

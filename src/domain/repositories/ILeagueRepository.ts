@@ -39,6 +39,28 @@ export interface ILeagueRepository {
    * Check if user is member of league
    */
   isUserMember(leagueId: number, userId: string): Promise<boolean>;
+
+  /**
+   * Find league with commissioner roster ID and user roster ID
+   */
+  findByIdWithCommissioner(
+    id: number,
+    userId: string
+  ): Promise<LeagueWithCommissioner | null>;
+
+  /**
+   * Reset league (delete all draft-related data)
+   * Should be called within a transaction
+   */
+  resetLeague(leagueId: number): Promise<void>;
+
+  /**
+   * Update commissioner roster ID
+   */
+  updateCommissionerRosterId(
+    leagueId: number,
+    commissionerRosterId: number
+  ): Promise<void>;
 }
 
 /**
@@ -53,4 +75,12 @@ export interface CreateLeagueParams {
   settings: Record<string, any>;
   scoringSettings: Record<string, any>;
   rosterPositions: Record<string, number>;
+}
+
+/**
+ * League with commissioner and user roster information
+ */
+export interface LeagueWithCommissioner extends League {
+  commissioner_roster_id?: number;
+  user_roster_id?: number;
 }

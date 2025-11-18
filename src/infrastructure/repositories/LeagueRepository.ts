@@ -3,6 +3,7 @@ import { League } from '../../domain/models/League';
 import {
   ILeagueRepository,
   CreateLeagueParams,
+  LeagueWithCommissioner,
 } from '../../domain/repositories/ILeagueRepository';
 
 /**
@@ -150,5 +151,59 @@ export class LeagueRepository implements ILeagueRepository {
     );
 
     return result.rows[0].exists;
+  }
+
+  async findByIdWithCommissioner(
+    id: number,
+    userId: string
+  ): Promise<LeagueWithCommissioner | null> {
+    const result = await this.db.query(
+      `SELECT
+        l.*,
+        commissioner.roster_id as commissioner_roster_id,
+        user_roster.roster_id as user_roster_id
+       FROM leagues l
+       LEFT JOIN rosters commissioner ON l.commissioner_roster_id = commissioner.roster_id AND l.id = commissioner.league_id
+       LEFT JOIN rosters user_roster ON l.id = user_roster.league_id AND user_roster.user_id = $1
+       WHERE l.id = $2`,
+      [userId, id]
+    );
+
+    return result.rows.length > 0 ? result.rows[0] : null;
+  }
+
+  async resetLeague(leagueId: number): Promise<void> {
+    // Delete all rosters
+    await this.db.query('DELETE FROM rosters WHERE league_id = $1', [
+      leagueId,
+    ]);
+
+    // Delete draft picks
+    await this.db.query('DELETE FROM draft_picks WHERE league_id = $1', [
+      leagueId,
+    ]);
+
+    // Reset league to pre_draft status
+    await this.db.query(
+      `UPDATE leagues
+       SET status = 'pre_draft',
+           commissioner_roster_id = NULL,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $1`,
+      [leagueId]
+    );
+  }
+
+  async updateCommissionerRosterId(
+    leagueId: number,
+    commissionerRosterId: number
+  ): Promise<void> {
+    await this.db.query(
+      `UPDATE leagues
+       SET commissioner_roster_id = $1,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $2`,
+      [commissionerRosterId, leagueId]
+    );
   }
 }

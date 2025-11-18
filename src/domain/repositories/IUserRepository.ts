@@ -34,4 +34,10 @@ export interface IUserRepository {
    * Check if username exists
    */
   usernameExists(username: string): Promise<boolean>;
+
+  /**
+   * Search for users by username (case-insensitive partial match)
+   * Excludes the specified userId from results
+   */
+  searchByUsername(query: string, excludeUserId?: string): Promise<User[]>;
 }
