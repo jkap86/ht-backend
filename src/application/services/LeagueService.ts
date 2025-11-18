@@ -222,6 +222,15 @@ export class LeagueService {
     if (updates.status && updates.status !== league.status) {
       changes.push(`status to "${updates.status}"`);
     }
+    if (updates.settings) {
+      changes.push('league settings');
+    }
+    if (updates.scoringSettings) {
+      changes.push('scoring settings');
+    }
+    if (updates.rosterPositions) {
+      changes.push('roster positions');
+    }
 
     // Update league
     await this.leagueRepository.update(leagueId, updates);
