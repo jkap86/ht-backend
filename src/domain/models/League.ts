@@ -87,6 +87,15 @@ export class League {
   }
 
   /**
+   * Check if the current user is the commissioner
+   */
+  isCommissioner(): boolean {
+    return this.commissionerRosterId !== null &&
+           this.userRosterId !== null &&
+           this.commissionerRosterId === this.userRosterId;
+  }
+
+  /**
    * Convert to plain object for API response
    */
   toJSON(): Record<string, any> {
@@ -100,6 +109,7 @@ export class League {
       draft_date: this.draftDate,
       commissioner_roster_id: this.commissionerRosterId,
       user_roster_id: this.userRosterId,
+      is_commissioner: this.isCommissioner(),
       settings: this.settings,
       scoring_settings: this.scoringSettings,
       roster_positions: this.rosterPositions,

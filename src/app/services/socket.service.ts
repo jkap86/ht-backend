@@ -42,9 +42,38 @@ export class SocketService {
   private io: Server;
 
   constructor(httpServer: HttpServer) {
+    // For development, allow multiple origins or use a function to check
+    const allowedOrigins = [
+      'http://localhost:3000',
+      'http://localhost:64629',
+      'http://localhost:8080',
+      'http://localhost:4200'
+    ];
+
     this.io = new Server(httpServer, {
       cors: {
-        origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+        origin: (origin, callback) => {
+          // Allow requests with no origin (like mobile apps or Postman)
+          if (!origin) return callback(null, true);
+
+          // In development, allow any localhost port
+          if (process.env.NODE_ENV !== 'production' && origin.startsWith('http://localhost:')) {
+            return callback(null, true);
+          }
+
+          // In production, use the configured URL or check allowed list
+          if (process.env.FRONTEND_URL && origin === process.env.FRONTEND_URL) {
+            return callback(null, true);
+          }
+
+          // Check against allowed origins list
+          if (allowedOrigins.includes(origin)) {
+            return callback(null, true);
+          }
+
+          // Reject other origins
+          return callback(new Error('Not allowed by CORS'));
+        },
         methods: ['GET', 'POST'],
         credentials: true,
       },
@@ -69,8 +98,8 @@ export class SocketService {
           throw new Error('JWT_SECRET not configured');
         }
 
-        const decoded = jwt.verify(token, jwtSecret) as { userId: string };
-        socket.userId = decoded.userId;
+        const decoded = jwt.verify(token, jwtSecret) as { sub: string; username: string };
+        socket.userId = decoded.sub;
         next();
       } catch (err) {
         next(new Error('Authentication error: Invalid token'));
@@ -112,6 +141,117 @@ export class SocketService {
         const roomName = `dm_${conversationId}`;
         socket.leave(roomName);
         console.log(`User ${socket.userId} left DM conversation ${conversationId}`);
+      });
+
+      // Generic join room handler (used by chat socket client)
+      socket.on('join_room', (data: { room: string }) => {
+        const { room } = data;
+        socket.join(room);
+        console.log(`User ${socket.userId} joined room ${room}`);
+      });
+
+      // Generic leave room handler
+      socket.on('leave_room', (data: { room: string }) => {
+        const { room } = data;
+        socket.leave(room);
+        console.log(`User ${socket.userId} left room ${room}`);
+      });
+
+      // Send a league chat message
+      socket.on('send_league_chat', async (data: { room: string; message: string; metadata?: any }) => {
+        const { room, message, metadata = {} } = data;
+        const senderId = socket.userId;
+
+        if (!senderId) {
+          console.error('[SocketService] send_league_chat: No userId on socket');
+          return;
+        }
+
+        if (!message || typeof message !== 'string' || message.trim().length === 0) {
+          console.error('[SocketService] send_league_chat: Invalid message');
+          return;
+        }
+
+        // Extract leagueId from room name (e.g., "league_123" -> "123")
+        const leagueMatch = room.match(/^league_(\d+)$/);
+        if (!leagueMatch) {
+          console.error('[SocketService] send_league_chat: Invalid room format');
+          return;
+        }
+
+        const leagueId = parseInt(leagueMatch[1], 10);
+        if (isNaN(leagueId)) {
+          console.error('[SocketService] send_league_chat: Invalid league ID');
+          return;
+        }
+
+        try {
+          // Import and use ChatService to save and emit
+          const { ChatService } = await import('../../application/services/ChatService');
+          const chatService = new ChatService();
+
+          // Check if user has access to this league
+          const hasAccess = await chatService.userHasLeagueAccess(senderId, leagueId);
+          if (!hasAccess) {
+            console.error('[SocketService] send_league_chat: User does not have access to league');
+            return;
+          }
+
+          // Send the message
+          await chatService.sendLeagueChatMessage(
+            leagueId,
+            senderId,
+            message.trim(),
+            'chat',
+            metadata
+          );
+          console.log(`[SocketService] League chat message sent to league ${leagueId} by user ${senderId}`);
+        } catch (err) {
+          console.error('[SocketService] send_league_chat error:', err);
+        }
+      });
+
+      // Send a direct message
+      socket.on('send_dm', async (data: { room: string; message: string; metadata?: any }) => {
+        const { room, message, metadata = {} } = data;
+        const senderId = socket.userId;
+
+        if (!senderId) {
+          console.error('[SocketService] send_dm: No userId on socket');
+          return;
+        }
+
+        if (!message || typeof message !== 'string' || message.trim().length === 0) {
+          console.error('[SocketService] send_dm: Invalid message');
+          return;
+        }
+
+        // Extract conversationId from room name (e.g., "dm_user1_user2" -> "user1_user2")
+        const conversationId = room.replace('dm_', '');
+        const participants = conversationId.split('_');
+
+        if (participants.length !== 2) {
+          console.error('[SocketService] send_dm: Invalid conversation ID format');
+          return;
+        }
+
+        // Find the receiver (the other participant)
+        const receiverId = participants.find((id) => id !== senderId);
+
+        if (!receiverId) {
+          console.error('[SocketService] send_dm: Could not determine receiver');
+          return;
+        }
+
+        try {
+          // Import and use ChatService to save and emit
+          const { ChatService } = await import('../../application/services/ChatService');
+          const chatService = new ChatService();
+          await chatService.sendDirectMessage(senderId, receiverId, message.trim(), metadata);
+          console.log(`[SocketService] DM sent from ${senderId} to ${receiverId}`);
+        } catch (err) {
+          console.error('[SocketService] send_dm error:', err);
+        }
       });
 
       // Handle disconnection

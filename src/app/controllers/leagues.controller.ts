@@ -333,7 +333,15 @@ export const getLeagueMembers = async (
 
     const members = await leagueService.getLeagueMembers(leagueId, userId);
 
-    return res.status(200).json({ members });
+    // Transform to match frontend expectations (camelCase + extract paid from settings)
+    const transformedMembers = members.map((member) => ({
+      rosterId: member.roster_id,
+      userId: member.user_id,
+      username: member.username,
+      paid: member.settings?.paid ?? false,
+    }));
+
+    return res.status(200).json({ members: transformedMembers });
   } catch (error) {
     next(error);
   }

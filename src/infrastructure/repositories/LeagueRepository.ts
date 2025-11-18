@@ -27,7 +27,9 @@ export class LeagueRepository implements ILeagueRepository {
 
   async findByUserId(userId: string): Promise<League[]> {
     const result = await this.db.query(
-      `SELECT l.*, r.roster_id as user_roster_id
+      `SELECT l.*,
+              r.roster_id as user_roster_id,
+              (l.settings->>'commissioner_roster_id')::int as commissioner_roster_id
        FROM leagues l
        INNER JOIN rosters r ON r.league_id = l.id
        WHERE r.user_id = $1
@@ -160,10 +162,10 @@ export class LeagueRepository implements ILeagueRepository {
     const result = await this.db.query(
       `SELECT
         l.*,
-        commissioner.roster_id as commissioner_roster_id,
+        (l.settings->>'commissioner_roster_id')::int as commissioner_roster_id,
         user_roster.roster_id as user_roster_id
        FROM leagues l
-       LEFT JOIN rosters commissioner ON l.commissioner_roster_id = commissioner.roster_id AND l.id = commissioner.league_id
+       LEFT JOIN rosters commissioner ON (l.settings->>'commissioner_roster_id')::int = commissioner.roster_id AND l.id = commissioner.league_id
        LEFT JOIN rosters user_roster ON l.id = user_roster.league_id AND user_roster.user_id = $1
        WHERE l.id = $2`,
       [userId, id]
@@ -187,7 +189,7 @@ export class LeagueRepository implements ILeagueRepository {
     await this.db.query(
       `UPDATE leagues
        SET status = 'pre_draft',
-           commissioner_roster_id = NULL,
+           settings = jsonb_set(COALESCE(settings, '{}'::jsonb), '{commissioner_roster_id}', 'null'::jsonb),
            updated_at = CURRENT_TIMESTAMP
        WHERE id = $1`,
       [leagueId]
@@ -200,7 +202,7 @@ export class LeagueRepository implements ILeagueRepository {
   ): Promise<void> {
     await this.db.query(
       `UPDATE leagues
-       SET commissioner_roster_id = $1,
+       SET settings = jsonb_set(COALESCE(settings, '{}'::jsonb), '{commissioner_roster_id}', to_jsonb($1)),
            updated_at = CURRENT_TIMESTAMP
        WHERE id = $2`,
       [commissionerRosterId, leagueId]

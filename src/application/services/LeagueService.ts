@@ -200,7 +200,7 @@ export class LeagueService {
     leagueId: number,
     userId: string,
     updates: Partial<League>
-  ): Promise<League> {
+  ): Promise<LeagueWithCommissioner> {
     // Verify league exists and user is member
     const league = await this.getLeagueById(leagueId, userId);
 
@@ -224,7 +224,7 @@ export class LeagueService {
     }
 
     // Update league
-    const updatedLeague = await this.leagueRepository.update(leagueId, updates);
+    await this.leagueRepository.update(leagueId, updates);
 
     // Send system message if there were changes
     if (changes.length > 0 && username) {
@@ -233,6 +233,16 @@ export class LeagueService {
         `${username} updated league ${changes.join(', ')}`,
         { event: 'league_updated', username, changes }
       );
+    }
+
+    // Fetch updated league with commissioner info
+    const updatedLeague = await this.leagueRepository.findByIdWithCommissioner(
+      leagueId,
+      userId
+    );
+
+    if (!updatedLeague) {
+      throw new NotFoundException('Failed to fetch updated league');
     }
 
     return updatedLeague;
