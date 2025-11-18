@@ -18,16 +18,19 @@ export interface JwtPayload {
   username: string;
 }
 
-export function signToken(payload: JwtPayload): string {
-  const options: jwt.SignOptions = {
+export function signToken(
+  payload: JwtPayload,
+  options?: { expiresIn?: string }
+): string {
+  const signOptions: jwt.SignOptions = {
     // NOTE:
     // @types/jsonwebtoken wants `number | StringValue` from `ms`,
     // but env vars are always string. This cast is safe because
     // jsonwebtoken itself accepts strings like "7d", "1h", etc.
-    expiresIn: RAW_EXPIRES_IN as unknown as jwt.SignOptions["expiresIn"],
+    expiresIn: (options?.expiresIn || RAW_EXPIRES_IN) as unknown as jwt.SignOptions["expiresIn"],
   };
 
-  return jwt.sign(payload, JWT_SECRET as jwt.Secret, options);
+  return jwt.sign(payload, JWT_SECRET as jwt.Secret, signOptions);
 }
 
 export function verifyToken(token: string): JwtPayload {

@@ -1,5 +1,4 @@
 import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
 import { User } from '../../domain/models/User';
 import { IUserRepository } from '../../domain/repositories/IUserRepository';
 import {
@@ -7,24 +6,18 @@ import {
   InvalidCredentialsException,
   ConflictException,
 } from '../../domain/exceptions/AuthExceptions';
+import { signToken, verifyToken } from '../../app/utils/jwt';
 
 /**
  * Authentication Service
  * Contains all business logic for authentication
  */
 export class AuthService {
-  private readonly JWT_SECRET: string;
-  private readonly REFRESH_SECRET: string;
   private readonly ACCESS_TOKEN_EXPIRY = '15m';
   private readonly REFRESH_TOKEN_EXPIRY = '30d';
 
   constructor(private readonly userRepository: IUserRepository) {
-    this.JWT_SECRET = process.env.JWT_SECRET!;
-    this.REFRESH_SECRET = process.env.REFRESH_SECRET || this.JWT_SECRET;
-
-    if (!this.JWT_SECRET) {
-      throw new Error('JWT_SECRET must be set in environment variables');
-    }
+    // JWT_SECRET validation is done in jwt.ts
   }
 
   /**
@@ -120,12 +113,9 @@ export class AuthService {
    */
   async refreshAccessToken(refreshToken: string): Promise<AuthResult> {
     try {
-      const payload = jwt.verify(refreshToken, this.REFRESH_SECRET) as {
-        userId: string;
-        username: string;
-      };
+      const payload = verifyToken(refreshToken);
 
-      const user = await this.userRepository.findById(payload.userId);
+      const user = await this.userRepository.findById(payload.sub);
       if (!user) {
         throw new InvalidCredentialsException('Invalid refresh token');
       }
@@ -148,23 +138,44 @@ export class AuthService {
    */
   verifyAccessToken(token: string): { userId: string; username: string } {
     try {
-      const payload = jwt.verify(token, this.JWT_SECRET) as {
-        userId: string;
-        username: string;
+      const payload = verifyToken(token);
+      return {
+        userId: payload.sub,
+        username: payload.username,
       };
-      return payload;
     } catch (error) {
       throw new InvalidCredentialsException('Invalid or expired token');
     }
   }
 
   /**
+   * Search for users by username (case-insensitive partial match)
+   * Excludes the current user from results
+   */
+  async searchUsers(
+    query: string,
+    currentUserId: string
+  ): Promise<
+    Array<{
+      userId: string;
+      username: string;
+      createdAt: Date;
+      updatedAt: Date;
+    }>
+  > {
+    const users = await this.userRepository.searchByUsername(
+      query,
+      currentUserId
+    );
+    return users.map((user) => user.toSafeObject());
+  }
+
+  /**
    * Generate access token (short-lived)
    */
   private generateAccessToken(user: User): string {
-    return jwt.sign(
-      { userId: user.userId, username: user.username },
-      this.JWT_SECRET,
+    return signToken(
+      { sub: user.userId, username: user.username },
       { expiresIn: this.ACCESS_TOKEN_EXPIRY }
     );
   }
@@ -173,9 +184,8 @@ export class AuthService {
    * Generate refresh token (long-lived)
    */
   private generateRefreshToken(user: User): string {
-    return jwt.sign(
-      { userId: user.userId, username: user.username },
-      this.REFRESH_SECRET,
+    return signToken(
+      { sub: user.userId, username: user.username },
       { expiresIn: this.REFRESH_TOKEN_EXPIRY }
     );
   }
