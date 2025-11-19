@@ -1,6 +1,6 @@
 import { Pool } from 'pg';
 import { pool as defaultPool } from '../../db/pool';
-import { getSocketService } from '../../app/services/socket.service';
+import { IChatEventsPublisher } from './IChatEventsPublisher';
 
 /**
  * Chat message types
@@ -41,7 +41,10 @@ export interface Conversation {
  * Handles all chat operations for both league chat and direct messages
  */
 export class ChatService {
-  constructor(private readonly pool: Pool = defaultPool) {}
+  constructor(
+    private readonly pool: Pool = defaultPool,
+    private readonly eventsPublisher?: IChatEventsPublisher,
+  ) {}
 
   /**
    * Get league chat messages
@@ -96,12 +99,14 @@ export class ChatService {
       username: userResult.rows[0]?.username || 'Unknown',
     };
 
-    // Emit via WebSocket
-    try {
-      const socketService = getSocketService();
-      socketService.emitChatMessage(leagueId, chatMessage);
-    } catch (err) {
-      console.error('[ChatService] Failed to emit chat message:', err);
+    // Emit via events publisher (Socket.IO implementation by default)
+    if (this.eventsPublisher) {
+      try {
+        this.eventsPublisher.emitLeagueMessage(leagueId, chatMessage);
+        console.log('[ChatService] Successfully emitted chat message');
+      } catch (err) {
+        console.error('[ChatService] Failed to emit chat message:', err);
+      }
     }
 
     return chatMessage;
@@ -136,12 +141,13 @@ export class ChatService {
         message
       );
 
-      try {
-        const socketService = getSocketService();
-        socketService.emitChatMessage(leagueId, systemMessage);
-        console.log('[ChatService] Successfully emitted system message');
-      } catch (err) {
-        console.error('[ChatService] Failed to emit system message:', err);
+      if (this.eventsPublisher) {
+        try {
+          this.eventsPublisher.emitLeagueMessage(leagueId, systemMessage);
+          console.log('[ChatService] Successfully emitted system message');
+        } catch (err) {
+          console.error('[ChatService] Failed to emit system message:', err);
+        }
       }
     } catch (error) {
       // Log error but don't throw - system messages shouldn't break the main flow
@@ -254,13 +260,14 @@ export class ChatService {
       receiver_username: receiver?.username || 'Unknown',
     };
 
-    // Emit via WebSocket
-    try {
-      const socketService = getSocketService();
-      const conversationId = [senderId, receiverId].sort().join('_');
-      socketService.emitDirectMessage(conversationId, directMessage);
-    } catch (err) {
-      console.error('[ChatService] Failed to emit direct message:', err);
+    // Emit via events publisher
+    if (this.eventsPublisher) {
+      try {
+        const conversationId = [senderId, receiverId].sort().join('_');
+        this.eventsPublisher.emitDirectMessage(conversationId, directMessage);
+      } catch (err) {
+        console.error('[ChatService] Failed to emit direct message:', err);
+      }
     }
 
     return directMessage;

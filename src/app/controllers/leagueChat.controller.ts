@@ -3,8 +3,10 @@ import { Response, NextFunction } from "express";
 import { AuthRequest } from "../middleware/auth.middleware";
 import { NotFoundError, ValidationError } from "../utils/errors";
 import { ChatService } from "../../application/services/ChatService";
+import { Container } from "../../infrastructure/di/Container";
 
-const chatService = new ChatService();
+const container = Container.getInstance();
+const chatService: ChatService = container.getChatService();
 
 /**
  * GET /api/leagues/:leagueId/chat

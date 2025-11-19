@@ -8,6 +8,8 @@ import { RosterRepository } from '../repositories/RosterRepository';
 import { AuthService } from '../../application/services/AuthService';
 import { LeagueService } from '../../application/services/LeagueService';
 import { ChatService } from '../../application/services/ChatService';
+import { SocketChatEventsPublisher } from '../../app/services/SocketChatEventsPublisher';
+import { IChatEventsPublisher } from '../../application/services/IChatEventsPublisher';
 
 /**
  * Dependency Injection Container
@@ -26,6 +28,7 @@ export class Container {
   private _authService?: AuthService;
   private _leagueService?: LeagueService;
   private _chatService?: ChatService;
+  private _chatEventsPublisher?: IChatEventsPublisher;
 
   private constructor(pool: Pool) {
     this.pool = pool;
@@ -96,7 +99,11 @@ export class Container {
    */
   getChatService(): ChatService {
     if (!this._chatService) {
-      this._chatService = new ChatService();
+      if (!this._chatEventsPublisher) {
+        this._chatEventsPublisher = new SocketChatEventsPublisher();
+      }
+
+      this._chatService = new ChatService(this.pool, this._chatEventsPublisher);
     }
     return this._chatService;
   }
