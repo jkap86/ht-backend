@@ -2,9 +2,13 @@ import { Pool } from 'pg';
 import { IUserRepository } from '../../domain/repositories/IUserRepository';
 import { ILeagueRepository } from '../../domain/repositories/ILeagueRepository';
 import { IRosterRepository } from '../../domain/repositories/IRosterRepository';
+import { ILeagueChatRepository } from '../../domain/repositories/ILeagueChatRepository';
+import { IDirectMessageRepository } from '../../domain/repositories/IDirectMessageRepository';
 import { UserRepository } from '../repositories/UserRepository';
 import { LeagueRepository } from '../repositories/LeagueRepository';
 import { RosterRepository } from '../repositories/RosterRepository';
+import { LeagueChatRepository } from '../repositories/LeagueChatRepository';
+import { DirectMessageRepository } from '../repositories/DirectMessageRepository';
 import { AuthService } from '../../application/services/AuthService';
 import { LeagueService } from '../../application/services/LeagueService';
 import { ChatService } from '../../application/services/ChatService';
@@ -23,6 +27,8 @@ export class Container {
   private _userRepository?: IUserRepository;
   private _leagueRepository?: ILeagueRepository;
   private _rosterRepository?: IRosterRepository;
+  private _leagueChatRepository?: ILeagueChatRepository;
+  private _directMessageRepository?: IDirectMessageRepository;
 
   // Services
   private _authService?: AuthService;
@@ -85,6 +91,26 @@ export class Container {
   }
 
   /**
+   * Get League Chat Repository
+   */
+  getLeagueChatRepository(): ILeagueChatRepository {
+    if (!this._leagueChatRepository) {
+      this._leagueChatRepository = new LeagueChatRepository(this.pool);
+    }
+    return this._leagueChatRepository;
+  }
+
+  /**
+   * Get Direct Message Repository
+   */
+  getDirectMessageRepository(): IDirectMessageRepository {
+    if (!this._directMessageRepository) {
+      this._directMessageRepository = new DirectMessageRepository(this.pool);
+    }
+    return this._directMessageRepository;
+  }
+
+  /**
    * Get Auth Service
    */
   getAuthService(): AuthService {
@@ -103,7 +129,12 @@ export class Container {
         this._chatEventsPublisher = new SocketChatEventsPublisher();
       }
 
-      this._chatService = new ChatService(this.pool, this._chatEventsPublisher);
+      this._chatService = new ChatService(
+        this.pool,
+        this._chatEventsPublisher,
+        this.getLeagueChatRepository(),
+        this.getDirectMessageRepository()
+      );
     }
     return this._chatService;
   }
@@ -130,8 +161,11 @@ export class Container {
     this._userRepository = undefined;
     this._leagueRepository = undefined;
     this._rosterRepository = undefined;
+    this._leagueChatRepository = undefined;
+    this._directMessageRepository = undefined;
     this._authService = undefined;
     this._leagueService = undefined;
     this._chatService = undefined;
+    this._chatEventsPublisher = undefined;
   }
 }

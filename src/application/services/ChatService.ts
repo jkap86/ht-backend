@@ -1,40 +1,13 @@
 import { Pool } from 'pg';
 import { pool as defaultPool } from '../../db/pool';
 import { IChatEventsPublisher } from './IChatEventsPublisher';
-
-/**
- * Chat message types
- */
-export interface ChatMessage {
-  id: number;
-  league_id: number;
-  user_id: string | null;
-  message: string;
-  message_type: string;
-  metadata: any;
-  created_at: Date;
-  username: string;
-}
-
-export interface DirectMessage {
-  id: number;
-  sender_id: string;
-  receiver_id: string;
-  message: string;
-  metadata: any;
-  read: boolean;
-  created_at: Date;
-  sender_username: string;
-  receiver_username: string;
-}
-
-export interface Conversation {
-  other_user_id: string;
-  other_username: string;
-  last_message: string;
-  last_message_time: Date;
-  unread_count: number;
-}
+import {
+  ChatMessage,
+  Conversation,
+  DirectMessage,
+} from '../../domain/models/Chat';
+import { ILeagueChatRepository } from '../../domain/repositories/ILeagueChatRepository';
+import { IDirectMessageRepository } from '../../domain/repositories/IDirectMessageRepository';
 
 /**
  * ChatService
@@ -44,6 +17,8 @@ export class ChatService {
   constructor(
     private readonly pool: Pool = defaultPool,
     private readonly eventsPublisher?: IChatEventsPublisher,
+    private readonly leagueChatRepository?: ILeagueChatRepository,
+    private readonly directMessageRepository?: IDirectMessageRepository,
   ) {}
 
   /**
@@ -53,6 +28,16 @@ export class ChatService {
     leagueId: number,
     limit: number = 100
   ): Promise<ChatMessage[]> {
+    if (this.leagueChatRepository) {
+      const messages = await this.leagueChatRepository.getLeagueChatMessages(
+        leagueId,
+        limit
+      );
+      // Reverse to get chronological order (oldest first)
+      return messages.reverse();
+    }
+
+    // Fallback to old inline query if repository not provided
     const result = await this.pool.query<ChatMessage>(
       `SELECT
         m.id, m.league_id, m.user_id, m.message, m.message_type,
@@ -80,24 +65,34 @@ export class ChatService {
     messageType: string = 'chat',
     metadata: Record<string, any> = {}
   ): Promise<ChatMessage> {
-    // Insert the message
-    const result = await this.pool.query<Omit<ChatMessage, 'username'>>(
-      `INSERT INTO league_chat_messages (league_id, user_id, message, message_type, metadata)
-       VALUES ($1, $2, $3, $4, $5)
-       RETURNING *`,
-      [leagueId, userId, message, messageType, JSON.stringify(metadata)]
-    );
+    // Insert the message via repository if available
+    const chatMessage: ChatMessage = this.leagueChatRepository
+      ? await this.leagueChatRepository.insertUserMessage(
+          leagueId,
+          userId,
+          message,
+          messageType,
+          metadata
+        )
+      : await (async () => {
+          // Fallback to old inline query
+          const result = await this.pool.query<Omit<ChatMessage, 'username'>>(
+            `INSERT INTO league_chat_messages (league_id, user_id, message, message_type, metadata)
+             VALUES ($1, $2, $3, $4, $5)
+             RETURNING *`,
+            [leagueId, userId, message, messageType, JSON.stringify(metadata)]
+          );
 
-    // Get the username
-    const userResult = await this.pool.query(
-      'SELECT username FROM users WHERE id = $1',
-      [userId]
-    );
+          const userResult = await this.pool.query(
+            'SELECT username FROM users WHERE id = $1',
+            [userId]
+          );
 
-    const chatMessage: ChatMessage = {
-      ...result.rows[0],
-      username: userResult.rows[0]?.username || 'Unknown',
-    };
+          return {
+            ...result.rows[0],
+            username: userResult.rows[0]?.username || 'Unknown',
+          } as ChatMessage;
+        })();
 
     // Emit via events publisher (Socket.IO implementation by default)
     if (this.eventsPublisher) {
@@ -122,17 +117,26 @@ export class ChatService {
     metadata: Record<string, any> = {}
   ): Promise<void> {
     try {
-      const result = await this.pool.query<Omit<ChatMessage, 'username'>>(
-        `INSERT INTO league_chat_messages (league_id, user_id, message, message_type, metadata)
-         VALUES ($1, NULL, $2, 'system', $3)
-         RETURNING *`,
-        [leagueId, message, JSON.stringify(metadata)]
-      );
+      const systemMessage: ChatMessage = this.leagueChatRepository
+        ? await this.leagueChatRepository.insertSystemMessage(
+            leagueId,
+            message,
+            metadata
+          )
+        : await (async () => {
+            // Fallback to old inline query
+            const result = await this.pool.query<Omit<ChatMessage, 'username'>>(
+              `INSERT INTO league_chat_messages (league_id, user_id, message, message_type, metadata)
+               VALUES ($1, NULL, $2, 'system', $3)
+               RETURNING *`,
+              [leagueId, message, JSON.stringify(metadata)]
+            );
 
-      const systemMessage: ChatMessage = {
-        ...result.rows[0],
-        username: 'System',
-      };
+            return {
+              ...result.rows[0],
+              username: 'System',
+            } as ChatMessage;
+          })();
 
       console.log(
         '[ChatService] Emitting system message to league',
@@ -162,6 +166,11 @@ export class ChatService {
    * Get all conversations for a user
    */
   async getConversations(userId: string): Promise<Conversation[]> {
+    if (this.directMessageRepository) {
+      return this.directMessageRepository.getConversations(userId);
+    }
+
+    // Fallback to old inline query if repository not provided
     const result = await this.pool.query<Conversation>(
       `WITH conversation_users AS (
         SELECT DISTINCT
@@ -187,7 +196,7 @@ export class ChatService {
          WHERE sender_id = cu.other_user_id AND receiver_id = $1 AND read = FALSE) as unread_count
       FROM conversation_users cu
       JOIN users u ON u.id = cu.other_user_id
-      ORDER BY last_message_time DESC`,
+      ORDER BY last_message_time DESC NULLS LAST`,
       [userId]
     );
 
@@ -202,18 +211,34 @@ export class ChatService {
     otherUserId: string,
     limit: number = 100
   ): Promise<DirectMessage[]> {
+    if (this.directMessageRepository) {
+      // Repository returns messages in chronological order (ASC) already
+      return this.directMessageRepository.getConversationMessages(
+        userId,
+        otherUserId,
+        limit
+      );
+    }
+
+    // Fallback to old inline query if repository not provided
     const result = await this.pool.query<DirectMessage>(
       `SELECT
-        dm.*,
-        sender.username as sender_username,
-        receiver.username as receiver_username
-      FROM direct_messages dm
-      JOIN users sender ON sender.id = dm.sender_id
-      JOIN users receiver ON receiver.id = dm.receiver_id
-      WHERE (dm.sender_id = $1 AND dm.receiver_id = $2)
-         OR (dm.sender_id = $2 AND dm.receiver_id = $1)
-      ORDER BY dm.created_at DESC
-      LIMIT $3`,
+        dm.id,
+        dm.sender_id,
+        dm.receiver_id,
+        dm.message,
+        dm.metadata,
+        dm.read,
+        dm.created_at,
+        u1.username as sender_username,
+        u2.username as receiver_username
+       FROM direct_messages dm
+       JOIN users u1 ON dm.sender_id = u1.id
+       JOIN users u2 ON dm.receiver_id = u2.id
+       WHERE (dm.sender_id = $1 AND dm.receiver_id = $2)
+          OR (dm.sender_id = $2 AND dm.receiver_id = $1)
+       ORDER BY dm.created_at ASC
+       LIMIT $3`,
       [userId, otherUserId, limit]
     );
 
@@ -225,7 +250,7 @@ export class ChatService {
       [otherUserId, userId]
     );
 
-    return result.rows.reverse();
+    return result.rows;
   }
 
   /**
@@ -237,28 +262,38 @@ export class ChatService {
     message: string,
     metadata: Record<string, any> = {}
   ): Promise<DirectMessage> {
-    // Insert the message
-    const result = await this.pool.query<Omit<DirectMessage, 'sender_username' | 'receiver_username'>>(
-      `INSERT INTO direct_messages (sender_id, receiver_id, message, metadata)
-       VALUES ($1, $2, $3, $4)
-       RETURNING *`,
-      [senderId, receiverId, message, JSON.stringify(metadata)]
-    );
+    // Insert the message via repository if available
+    const directMessage: DirectMessage = this.directMessageRepository
+      ? await this.directMessageRepository.insertDirectMessage(
+          senderId,
+          receiverId,
+          message,
+          metadata
+        )
+      : await (async () => {
+          // Fallback to old inline query
+          const result =
+            await this.pool.query<Omit<DirectMessage, 'sender_username' | 'receiver_username'>>(
+              `INSERT INTO direct_messages (sender_id, receiver_id, message, metadata)
+               VALUES ($1, $2, $3, $4)
+               RETURNING *`,
+              [senderId, receiverId, message, JSON.stringify(metadata)]
+            );
 
-    // Get usernames
-    const usersResult = await this.pool.query(
-      `SELECT id, username FROM users WHERE id IN ($1, $2)`,
-      [senderId, receiverId]
-    );
+          const usersResult = await this.pool.query<{ id: string; username: string }>(
+            `SELECT id, username FROM users WHERE id IN ($1, $2)`,
+            [senderId, receiverId]
+          );
 
-    const sender = usersResult.rows.find((u) => u.id === senderId);
-    const receiver = usersResult.rows.find((u) => u.id === receiverId);
+          const sender = usersResult.rows.find((u: { id: string; username: string }) => u.id === senderId);
+          const receiver = usersResult.rows.find((u: { id: string; username: string }) => u.id === receiverId);
 
-    const directMessage: DirectMessage = {
-      ...result.rows[0],
-      sender_username: sender?.username || 'Unknown',
-      receiver_username: receiver?.username || 'Unknown',
-    };
+          return {
+            ...result.rows[0],
+            sender_username: sender?.username || 'Unknown',
+            receiver_username: receiver?.username || 'Unknown',
+          } as DirectMessage;
+        })();
 
     // Emit via events publisher
     if (this.eventsPublisher) {
