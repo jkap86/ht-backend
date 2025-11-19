@@ -5,8 +5,12 @@ import { NotFoundError, ValidationError } from "../utils/errors";
 import { ChatService } from "../../application/services/ChatService";
 import { Container } from "../../infrastructure/di/Container";
 
-const container = Container.getInstance();
-const chatService: ChatService = container.getChatService();
+/**
+ * Lazy getter for ChatService - ensures Container is initialized before access
+ */
+function getChatService(): ChatService {
+  return Container.getInstance().getChatService();
+}
 
 /**
  * GET /api/leagues/:leagueId/chat
@@ -31,6 +35,7 @@ export const getChatMessages = async (
     }
 
     // Check if user has access to this league
+    const chatService = getChatService();
     const hasAccess = await chatService.userHasLeagueAccess(userId, leagueId);
     if (!hasAccess) {
       throw new NotFoundError("League not found or access denied");
@@ -76,6 +81,7 @@ export const sendChatMessage = async (
     }
 
     // Check if user has access to this league
+    const chatService = getChatService();
     const hasAccess = await chatService.userHasLeagueAccess(userId, leagueId);
     if (!hasAccess) {
       throw new NotFoundError("League not found or access denied");
@@ -107,5 +113,6 @@ export const sendSystemMessage = async (
   message: string,
   metadata: Record<string, any> = {}
 ): Promise<void> => {
+  const chatService = getChatService();
   return chatService.sendSystemMessage(leagueId, message, metadata);
 };

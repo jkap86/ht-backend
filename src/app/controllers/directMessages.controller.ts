@@ -5,8 +5,12 @@ import { ValidationError, NotFoundError } from "../utils/errors";
 import { ChatService } from "../../application/services/ChatService";
 import { Container } from "../../infrastructure/di/Container";
 
-const container = Container.getInstance();
-const chatService: ChatService = container.getChatService();
+/**
+ * Lazy getter for ChatService - ensures Container is initialized before access
+ */
+function getChatService(): ChatService {
+  return Container.getInstance().getChatService();
+}
 
 /**
  * GET /api/direct-messages/conversations
@@ -24,6 +28,7 @@ export const getConversations = async (
       throw new ValidationError("User ID not found in request");
     }
 
+    const chatService = getChatService();
     const conversations = await chatService.getConversations(userId);
 
     return res.status(200).json(conversations);
@@ -50,6 +55,7 @@ export const getMessages = async (
       throw new ValidationError("User ID not found in request");
     }
 
+    const chatService = getChatService();
     const messages = await chatService.getDirectMessages(userId, otherUserId, limit);
 
     return res.status(200).json(messages);
@@ -89,6 +95,7 @@ export const sendMessage = async (
     }
 
     // Verify receiver exists
+    const chatService = getChatService();
     const receiverExists = await chatService.userExists(receiverId);
     if (!receiverExists) {
       throw new NotFoundError("Receiver not found");
