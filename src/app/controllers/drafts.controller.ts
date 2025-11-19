@@ -481,6 +481,7 @@ export const getDraftOrder = async (
         d_order.roster_id,
         d_order.draft_position,
         r.roster_id as roster_number,
+        r.user_id,
         COALESCE(u.username, 'Team ' || r.roster_id) as username
        FROM draft_order d_order
        INNER JOIN rosters r ON r.id = d_order.roster_id
@@ -490,7 +491,18 @@ export const getDraftOrder = async (
       [draftId]
     );
 
-    return res.status(200).json(orderResult.rows);
+    // Transform snake_case to camelCase for frontend
+    const draftOrder = orderResult.rows.map(row => ({
+      id: row.id,
+      draftId: row.draft_id,
+      rosterId: row.roster_id,
+      draftPosition: row.draft_position,
+      rosterNumber: row.roster_number,
+      userId: row.user_id,
+      username: row.username,
+    }));
+
+    return res.status(200).json(draftOrder);
   } catch (error) {
     next(error);
   }
@@ -616,6 +628,7 @@ export const randomizeDraftOrder = async (
         d_order.roster_id,
         d_order.draft_position,
         r.roster_id as roster_number,
+        r.user_id,
         COALESCE(u.username, 'Team ' || r.roster_id) as username
        FROM draft_order d_order
        INNER JOIN rosters r ON r.id = d_order.roster_id
@@ -636,7 +649,18 @@ export const randomizeDraftOrder = async (
       { draft_id: draftId, action: 'draft_order_randomized' }
     );
 
-    return res.status(200).json(orderResult.rows);
+    // Transform snake_case to camelCase for frontend
+    const draftOrder = orderResult.rows.map(row => ({
+      id: row.id,
+      draftId: row.draft_id,
+      rosterId: row.roster_id,
+      draftPosition: row.draft_position,
+      rosterNumber: row.roster_number,
+      userId: row.user_id,
+      username: row.username,
+    }));
+
+    return res.status(200).json(draftOrder);
   } catch (error) {
     next(error);
   }
