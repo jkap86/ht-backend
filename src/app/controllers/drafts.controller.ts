@@ -90,7 +90,27 @@ export const getLeagueDrafts = async (
       [leagueId]
     );
 
-    return res.status(200).json(result.rows);
+    // Transform snake_case to camelCase for frontend
+    const drafts = result.rows.map(row => ({
+      id: row.id,
+      leagueId: row.league_id,
+      draftType: row.draft_type,
+      thirdRoundReversal: row.third_round_reversal,
+      status: row.status,
+      currentPick: row.current_pick,
+      currentRound: row.current_round,
+      currentRosterId: row.current_roster_id,
+      pickTimeSeconds: row.pick_time_seconds,
+      pickDeadline: row.pick_deadline,
+      rounds: row.rounds,
+      startedAt: row.started_at,
+      completedAt: row.completed_at,
+      settings: row.settings,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    }));
+
+    return res.status(200).json(drafts);
   } catch (error) {
     next(error);
   }
@@ -132,7 +152,28 @@ export const getDraft = async (
       throw new NotFoundError("Draft not found");
     }
 
-    return res.status(200).json(result.rows[0]);
+    // Transform snake_case to camelCase for frontend
+    const row = result.rows[0];
+    const draft = {
+      id: row.id,
+      leagueId: row.league_id,
+      draftType: row.draft_type,
+      thirdRoundReversal: row.third_round_reversal,
+      status: row.status,
+      currentPick: row.current_pick,
+      currentRound: row.current_round,
+      currentRosterId: row.current_roster_id,
+      pickTimeSeconds: row.pick_time_seconds,
+      pickDeadline: row.pick_deadline,
+      rounds: row.rounds,
+      startedAt: row.started_at,
+      completedAt: row.completed_at,
+      settings: row.settings,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+
+    return res.status(200).json(draft);
   } catch (error) {
     next(error);
   }
@@ -212,7 +253,28 @@ export const createDraft = async (
       ]
     );
 
-    return res.status(201).json(result.rows[0]);
+    // Transform snake_case to camelCase for frontend
+    const row = result.rows[0];
+    const draft = {
+      id: row.id,
+      leagueId: row.league_id,
+      draftType: row.draft_type,
+      thirdRoundReversal: row.third_round_reversal,
+      status: row.status,
+      currentPick: row.current_pick,
+      currentRound: row.current_round,
+      currentRosterId: row.current_roster_id,
+      pickTimeSeconds: row.pick_time_seconds,
+      pickDeadline: row.pick_deadline,
+      rounds: row.rounds,
+      startedAt: row.started_at,
+      completedAt: row.completed_at,
+      settings: row.settings,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+
+    return res.status(201).json(draft);
   } catch (error) {
     next(error);
   }
@@ -303,7 +365,28 @@ export const updateDraft = async (
       ]
     );
 
-    return res.status(200).json(result.rows[0]);
+    // Transform snake_case to camelCase for frontend
+    const row = result.rows[0];
+    const draft = {
+      id: row.id,
+      leagueId: row.league_id,
+      draftType: row.draft_type,
+      thirdRoundReversal: row.third_round_reversal,
+      status: row.status,
+      currentPick: row.current_pick,
+      currentRound: row.current_round,
+      currentRosterId: row.current_roster_id,
+      pickTimeSeconds: row.pick_time_seconds,
+      pickDeadline: row.pick_deadline,
+      rounds: row.rounds,
+      startedAt: row.started_at,
+      completedAt: row.completed_at,
+      settings: row.settings,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+
+    return res.status(200).json(draft);
   } catch (error) {
     next(error);
   }
