@@ -2,6 +2,7 @@
 import { Server as HttpServer } from "http";
 import { Server, Socket } from "socket.io";
 import jwt from "jsonwebtoken";
+import { Container } from "../../infrastructure/di/Container";
 
 interface AuthenticatedSocket extends Socket {
   userId?: string;
@@ -208,11 +209,8 @@ export class SocketService {
           }
 
           try {
-            // Import and use ChatService to save and emit
-            const { ChatService } = await import(
-              "../../application/services/ChatService"
-            );
-            const chatService = new ChatService();
+            // Use ChatService from DI Container (includes eventsPublisher for real-time emission)
+            const chatService = Container.getInstance().getChatService();
 
             // Check if user has access to this league
             const hasAccess = await chatService.userHasLeagueAccess(
@@ -226,7 +224,7 @@ export class SocketService {
               return;
             }
 
-            // Send the message
+            // Send the message (will automatically emit via ChatService)
             await chatService.sendLeagueChatMessage(
               leagueId,
               senderId,
@@ -286,11 +284,8 @@ export class SocketService {
           }
 
           try {
-            // Import and use ChatService to save and emit
-            const { ChatService } = await import(
-              "../../application/services/ChatService"
-            );
-            const chatService = new ChatService();
+            // Use ChatService from DI Container (includes eventsPublisher for real-time emission)
+            const chatService = Container.getInstance().getChatService();
             await chatService.sendDirectMessage(
               senderId,
               receiverId,
