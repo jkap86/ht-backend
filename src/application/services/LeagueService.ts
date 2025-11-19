@@ -101,12 +101,15 @@ export class LeagueService {
       throw new ValidationException('User not found');
     }
 
+    // Determine if league is free (dues = 0)
+    const isFreeLeague = (params.settings?.dues ?? 0) === 0;
+
     // Create commissioner roster with roster_id = 1
     const commissionerRoster = await this.rosterRepository.create({
       leagueId: league.id,
       userId,
       rosterId: 1,
-      settings: {},
+      settings: { paid: isFreeLeague },
     });
 
     // Update league with commissioner roster ID
@@ -114,6 +117,16 @@ export class LeagueService {
       league.id,
       commissionerRoster.roster_id
     );
+
+    // Create remaining rosters with NULL user_id
+    for (let i = 2; i <= params.totalRosters; i++) {
+      await this.rosterRepository.create({
+        leagueId: league.id,
+        userId: null,
+        rosterId: i,
+        settings: {},
+      });
+    }
 
     // Send system message
     await this.chatService.sendSystemMessage(
@@ -155,16 +168,15 @@ export class LeagueService {
       throw new ValidationException('You are already a member of this league');
     }
 
-    // Check if league is full
-    const currentMemberCount =
-      await this.rosterRepository.countByLeagueId(leagueId);
-    if (currentMemberCount >= league.totalRosters) {
-      throw new ValidationException('League is full');
-    }
+    // Find first available roster (user_id IS NULL)
+    const allRosters = await this.rosterRepository.findByLeagueId(leagueId);
+    const availableRoster = allRosters
+      .filter((r) => r.user_id === null)
+      .sort((a, b) => a.roster_id - b.roster_id)[0];
 
-    // Get next roster ID
-    const nextRosterId =
-      await this.rosterRepository.getNextRosterId(leagueId);
+    if (!availableRoster) {
+      throw new ValidationException('League is full - no available roster slots');
+    }
 
     // Get username for system message
     const username = await this.rosterRepository.getUsernameById(userId);
@@ -172,19 +184,37 @@ export class LeagueService {
       throw new ValidationException('User not found');
     }
 
-    // Create roster
-    const roster = await this.rosterRepository.create({
+    // Determine if league is free (dues = 0)
+    const isFreeLeague = (league.settings?.dues ?? 0) === 0;
+
+    // Assign user to the available roster
+    const updatedRoster = await this.rosterRepository.updateSettings(
       leagueId,
-      userId,
-      rosterId: nextRosterId,
-      settings: {},
-    });
+      availableRoster.roster_id,
+      { ...availableRoster.settings, paid: isFreeLeague }
+    );
+
+    // Update roster user_id
+    await this.db.query(
+      'UPDATE rosters SET user_id = $1, updated_at = CURRENT_TIMESTAMP WHERE league_id = $2 AND roster_id = $3',
+      [userId, leagueId, availableRoster.roster_id]
+    );
+
+    // Fetch the updated roster
+    const roster = await this.rosterRepository.findByLeagueAndRosterId(
+      leagueId,
+      availableRoster.roster_id
+    );
+
+    if (!roster) {
+      throw new Error('Failed to assign user to roster');
+    }
 
     // Send system message
     await this.chatService.sendSystemMessage(
       leagueId,
       `${username} joined the league`,
-      { event: 'user_joined', username, roster_id: nextRosterId }
+      { event: 'user_joined', username, roster_id: availableRoster.roster_id }
     );
 
     return {
@@ -222,6 +252,9 @@ export class LeagueService {
     if (updates.status && updates.status !== league.status) {
       changes.push(`status to "${updates.status}"`);
     }
+    if (updates.totalRosters && updates.totalRosters !== league.totalRosters) {
+      changes.push(`total teams to ${updates.totalRosters}`);
+    }
     if (updates.settings) {
       changes.push('league settings');
     }
@@ -234,6 +267,67 @@ export class LeagueService {
 
     // Update league
     await this.leagueRepository.update(leagueId, updates);
+
+    // Handle total rosters changes - add or remove roster slots
+    if (updates.totalRosters && updates.totalRosters !== league.totalRosters) {
+      const oldTotal = league.totalRosters;
+      const newTotal = updates.totalRosters;
+
+      if (newTotal > oldTotal) {
+        // Add new rosters with NULL user_id
+        for (let i = oldTotal + 1; i <= newTotal; i++) {
+          await this.rosterRepository.create({
+            leagueId,
+            userId: null,
+            rosterId: i,
+            settings: {},
+          });
+        }
+      } else if (newTotal < oldTotal) {
+        // Remove unassigned rosters from the end
+        const rostersToDelete = oldTotal - newTotal;
+        const rosters = await this.rosterRepository.findByLeagueId(leagueId);
+
+        // Filter to unassigned rosters and sort by roster_id descending
+        const unassignedRosters = rosters
+          .filter((r) => r.user_id === null)
+          .sort((a, b) => b.roster_id - a.roster_id);
+
+        if (unassignedRosters.length < rostersToDelete) {
+          throw new ValidationException(
+            `Cannot reduce total teams. Need ${rostersToDelete} empty slots but only ${unassignedRosters.length} available.`
+          );
+        }
+
+        // Delete the required number of unassigned rosters
+        for (let i = 0; i < rostersToDelete; i++) {
+          await this.db.query(
+            'DELETE FROM rosters WHERE league_id = $1 AND roster_id = $2',
+            [leagueId, unassignedRosters[i].roster_id]
+          );
+        }
+      }
+    }
+
+    // Handle dues changes - update all roster payment statuses
+    if (updates.settings?.dues !== undefined) {
+      const oldDues = league.settings?.dues ?? 0;
+      const newDues = updates.settings.dues;
+
+      // If dues changed between free (0) and paid (>0)
+      if ((oldDues === 0 && newDues > 0) || (oldDues > 0 && newDues === 0)) {
+        const rosters = await this.rosterRepository.findByLeagueId(leagueId);
+        const newPaidStatus = newDues === 0; // Free league = paid: true
+
+        // Update all rosters
+        for (const roster of rosters) {
+          await this.rosterRepository.updateSettings(leagueId, roster.roster_id, {
+            ...roster.settings,
+            paid: newPaidStatus,
+          });
+        }
+      }
+    }
 
     // Send system message if there were changes
     if (changes.length > 0 && username) {
@@ -286,7 +380,7 @@ export class LeagueService {
       await client.query(
         `UPDATE leagues
          SET status = 'pre_draft',
-             commissioner_roster_id = NULL,
+             settings = jsonb_set(COALESCE(settings, '{}'::jsonb), '{commissioner_roster_id}', 'null'::jsonb),
              updated_at = CURRENT_TIMESTAMP
          WHERE id = $1`,
         [leagueId]
@@ -336,18 +430,19 @@ export class LeagueService {
     // Verify league exists and user is member
     const league = await this.getLeagueById(leagueId, userId);
 
-    // Validate league not full
-    const currentMemberCount =
-      await this.rosterRepository.countByLeagueId(leagueId);
-    const availableSlots = league.totalRosters - currentMemberCount;
+    // Get all rosters and find available slots
+    const allRosters = await this.rosterRepository.findByLeagueId(leagueId);
+    const availableRosters = allRosters
+      .filter((r) => r.user_id === null)
+      .sort((a, b) => a.roster_id - b.roster_id);
 
-    if (availableSlots === 0) {
+    if (availableRosters.length === 0) {
       throw new ValidationException('League is full');
     }
 
-    if (usernames.length > availableSlots) {
+    if (usernames.length > availableRosters.length) {
       throw new ValidationException(
-        `Cannot add ${usernames.length} users. Only ${availableSlots} slots available.`
+        `Cannot add ${usernames.length} users. Only ${availableRosters.length} slots available.`
       );
     }
 
@@ -361,6 +456,10 @@ export class LeagueService {
       message: string;
     }> = [];
 
+    // Determine if league is free (dues = 0)
+    const isFreeLeague = (league.settings?.dues ?? 0) === 0;
+
+    let rosterIndex = 0;
     for (const username of usernames) {
       const targetUserId = userMap.get(username);
 
@@ -387,23 +486,28 @@ export class LeagueService {
         continue;
       }
 
-      // Get next roster ID
-      const nextRosterId =
-        await this.rosterRepository.getNextRosterId(leagueId);
+      // Get next available roster
+      const roster = availableRosters[rosterIndex];
+      rosterIndex++;
 
-      // Create roster
-      await this.rosterRepository.create({
+      // Update roster settings
+      await this.rosterRepository.updateSettings(
         leagueId,
-        userId: targetUserId,
-        rosterId: nextRosterId,
-        settings: {},
-      });
+        roster.roster_id,
+        { ...roster.settings, paid: isFreeLeague }
+      );
+
+      // Assign user to roster
+      await this.db.query(
+        'UPDATE rosters SET user_id = $1, updated_at = CURRENT_TIMESTAMP WHERE league_id = $2 AND roster_id = $3',
+        [targetUserId, leagueId, roster.roster_id]
+      );
 
       // Send system message
       await this.chatService.sendSystemMessage(
         leagueId,
         `${username} was added to the league`,
-        { event: 'user_added', username, roster_id: nextRosterId }
+        { event: 'user_added', username, roster_id: roster.roster_id }
       );
 
       results.push({
@@ -449,17 +553,19 @@ export class LeagueService {
       updatedSettings
     );
 
-    // Get member username for system message
-    const memberUsername = await this.rosterRepository.getUsernameById(
-      roster.user_id
-    );
-
-    if (memberUsername) {
-      await this.chatService.sendSystemMessage(
-        leagueId,
-        `${memberUsername}'s payment status updated to ${paid ? 'paid' : 'unpaid'}`,
-        { event: 'payment_updated', username: memberUsername, paid }
+    // Get member username for system message (only if roster has assigned user)
+    if (roster.user_id) {
+      const memberUsername = await this.rosterRepository.getUsernameById(
+        roster.user_id
       );
+
+      if (memberUsername) {
+        await this.chatService.sendSystemMessage(
+          leagueId,
+          `${memberUsername}'s payment status updated to ${paid ? 'paid' : 'unpaid'}`,
+          { event: 'payment_updated', username: memberUsername, paid }
+        );
+      }
     }
 
     return updatedRoster;
@@ -498,3 +604,4 @@ export class LeagueService {
     await this.leagueRepository.delete(leagueId);
   }
 }
+

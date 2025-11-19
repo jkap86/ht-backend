@@ -2,11 +2,13 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import { createServer } from "http";
+import cron from "node-cron";
 
 import { pool } from "./db/pool";
 import { Container } from "./infrastructure/di/Container";
 import { errorHandler } from "./app/middleware/error.middleware";
 import { initializeSocketService } from "./app/services/socket.service";
+import { processExpiredDerbyPicks } from "./app/services/derby-autopick.service";
 
 dotenv.config();
 
@@ -71,6 +73,13 @@ initializeSocketService(server);
 server.listen(PORT, () => {
   console.log(`Backend running on port ${PORT}`);
   console.log(`WebSocket server initialized`);
+
+  // Initialize derby auto-pick cron job (runs every 5 seconds)
+  cron.schedule('*/5 * * * * *', async () => {
+    await processExpiredDerbyPicks();
+  });
+
+  console.log(`Derby auto-pick service initialized (checks every 5 seconds)`);
 });
 
 // Keep the process alive
@@ -89,4 +98,5 @@ process.on('SIGTERM', () => {
     process.exit(0);
   });
 });
+
 

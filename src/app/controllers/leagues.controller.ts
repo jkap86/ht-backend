@@ -191,6 +191,7 @@ export const updateLeague = async (
     // Build updates object
     const updates: any = {};
     if (req.body.name) updates.name = req.body.name;
+    if (req.body.total_rosters) updates.totalRosters = req.body.total_rosters;
     if (req.body.settings) updates.settings = req.body.settings;
     if (req.body.scoring_settings)
       updates.scoringSettings = req.body.scoring_settings;

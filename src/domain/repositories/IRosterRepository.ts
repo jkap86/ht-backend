@@ -65,7 +65,7 @@ export interface IRosterRepository {
 export interface Roster {
   id: number;
   league_id: number;
-  user_id: string;
+  user_id: string | null;
   roster_id: number;
   settings: Record<string, any>;
   created_at: Date;
@@ -77,7 +77,7 @@ export interface Roster {
  */
 export interface CreateRosterParams {
   leagueId: number;
-  userId: string;
+  userId: string | null;
   rosterId: number;
   settings?: Record<string, any>;
 }

@@ -44,7 +44,6 @@ export class LeagueRepository implements ILeagueRepository {
     const result = await this.db.query(
       `INSERT INTO leagues (
         name,
-        description,
         total_rosters,
         season,
         season_type,
@@ -53,11 +52,10 @@ export class LeagueRepository implements ILeagueRepository {
         scoring_settings,
         roster_positions
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
       RETURNING *`,
       [
         params.name,
-        params.description || null,
         params.totalRosters,
         params.season,
         params.seasonType,
@@ -81,14 +79,14 @@ export class LeagueRepository implements ILeagueRepository {
       values.push(updates.name);
     }
 
-    if (updates.description !== undefined) {
-      setClauses.push(`description = $${paramIndex++}`);
-      values.push(updates.description);
-    }
-
     if (updates.status) {
       setClauses.push(`status = $${paramIndex++}`);
       values.push(updates.status);
+    }
+
+    if (updates.totalRosters !== undefined) {
+      setClauses.push(`total_rosters = $${paramIndex++}`);
+      values.push(updates.totalRosters);
     }
 
     if (updates.settings) {
@@ -202,10 +200,11 @@ export class LeagueRepository implements ILeagueRepository {
   ): Promise<void> {
     await this.db.query(
       `UPDATE leagues
-       SET settings = jsonb_set(COALESCE(settings, '{}'::jsonb), '{commissioner_roster_id}', to_jsonb($1)),
+       SET settings = jsonb_set(COALESCE(settings, '{}'::jsonb), '{commissioner_roster_id}', to_jsonb($1::integer)),
            updated_at = CURRENT_TIMESTAMP
        WHERE id = $2`,
       [commissionerRosterId, leagueId]
     );
   }
 }
+
