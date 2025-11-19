@@ -936,8 +936,8 @@ export const pauseDerby = async (
     }
 
     // Get draft settings
-    const draftResult = await pool.query(
-      "SELECT id, settings FROM drafts WHERE id = $1 AND league_id = $2",
+    const draftResult = await pool.query<DraftRow>(
+      "SELECT * FROM drafts WHERE id = $1 AND league_id = $2",
       [draftId, leagueId]
     );
 
@@ -960,8 +960,8 @@ export const pauseDerby = async (
     settings.derby_status = 'paused';
     delete settings.pick_deadline; // Remove the deadline when paused
 
-    await pool.query(
-      `UPDATE drafts SET settings = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
+    const result = await pool.query<DraftRow>(
+      `UPDATE drafts SET settings = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING *`,
       [JSON.stringify(settings), draftId]
     );
 
@@ -980,10 +980,28 @@ export const pauseDerby = async (
       { draft_id: draftId, action: 'derby_paused' }
     );
 
-    return res.status(200).json({
-      message: 'Derby paused successfully',
-      derby_status: 'paused',
-    });
+    // Transform snake_case to camelCase for frontend
+    const row = result.rows[0];
+    const updatedDraft = {
+      id: row.id,
+      leagueId: row.league_id,
+      draftType: row.draft_type,
+      thirdRoundReversal: row.third_round_reversal,
+      status: row.status,
+      currentPick: row.current_pick,
+      currentRound: row.current_round,
+      currentRosterId: row.current_roster_id,
+      pickTimeSeconds: row.pick_time_seconds,
+      pickDeadline: row.pick_deadline,
+      rounds: row.rounds,
+      startedAt: row.started_at,
+      completedAt: row.completed_at,
+      settings: row.settings,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+
+    return res.status(200).json(updatedDraft);
   } catch (error) {
     next(error);
   }
@@ -1017,8 +1035,8 @@ export const resumeDerby = async (
     }
 
     // Get draft settings and pick time
-    const draftResult = await pool.query(
-      "SELECT id, settings, pick_time_seconds FROM drafts WHERE id = $1 AND league_id = $2",
+    const draftResult = await pool.query<DraftRow>(
+      "SELECT * FROM drafts WHERE id = $1 AND league_id = $2",
       [draftId, leagueId]
     );
 
@@ -1041,8 +1059,8 @@ export const resumeDerby = async (
     settings.derby_status = 'in_progress';
     settings.pick_deadline = new Date(Date.now() + draft.pick_time_seconds * 1000).toISOString();
 
-    await pool.query(
-      `UPDATE drafts SET settings = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
+    const result = await pool.query<DraftRow>(
+      `UPDATE drafts SET settings = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING *`,
       [JSON.stringify(settings), draftId]
     );
 
@@ -1061,11 +1079,28 @@ export const resumeDerby = async (
       { draft_id: draftId, action: 'derby_resumed' }
     );
 
-    return res.status(200).json({
-      message: 'Derby resumed successfully',
-      derby_status: 'in_progress',
-      pick_deadline: settings.pick_deadline,
-    });
+    // Transform snake_case to camelCase for frontend
+    const row = result.rows[0];
+    const updatedDraft = {
+      id: row.id,
+      leagueId: row.league_id,
+      draftType: row.draft_type,
+      thirdRoundReversal: row.third_round_reversal,
+      status: row.status,
+      currentPick: row.current_pick,
+      currentRound: row.current_round,
+      currentRosterId: row.current_roster_id,
+      pickTimeSeconds: row.pick_time_seconds,
+      pickDeadline: row.pick_deadline,
+      rounds: row.rounds,
+      startedAt: row.started_at,
+      completedAt: row.completed_at,
+      settings: row.settings,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+
+    return res.status(200).json(updatedDraft);
   } catch (error) {
     next(error);
   }
