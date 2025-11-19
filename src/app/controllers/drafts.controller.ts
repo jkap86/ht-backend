@@ -307,9 +307,9 @@ export const updateDraft = async (
       throw new ForbiddenError("Only the commissioner can update drafts");
     }
 
-    // Check if draft exists and belongs to this league
-    const checkResult = await pool.query(
-      "SELECT id FROM drafts WHERE id = $1 AND league_id = $2",
+    // Check if draft exists and belongs to this league and get existing settings
+    const checkResult = await pool.query<DraftRow>(
+      "SELECT settings FROM drafts WHERE id = $1 AND league_id = $2",
       [draftId, leagueId]
     );
 
@@ -329,11 +329,13 @@ export const updateDraft = async (
       auto_start_derby,
     } = req.body;
 
-    // Build settings object
+    // Merge with existing settings to preserve fields like derby_status, current_picker_index, etc.
+    const existingSettings = checkResult.rows[0].settings || {};
     const settings: any = {
-      player_pool: player_pool || 'all',
-      draft_order: draft_order || 'randomize',
-      timer_mode: timer_mode || 'per_pick',
+      ...existingSettings,
+      player_pool: player_pool !== undefined ? player_pool : (existingSettings.player_pool || 'all'),
+      draft_order: draft_order !== undefined ? draft_order : (existingSettings.draft_order || 'randomize'),
+      timer_mode: timer_mode !== undefined ? timer_mode : (existingSettings.timer_mode || 'per_pick'),
     };
 
     // Add derby-specific fields if provided
