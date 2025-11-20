@@ -48,13 +48,14 @@ async function autoPickSlot(
   derbyTimerSeconds: number
 ) {
   // Get the current draft order
+  // Order by id to preserve the original derby picking order (not draft_position which changes as people pick)
   const orderResult = await pool.query(
     `SELECT d_order.id, d_order.roster_id, d_order.draft_position, r.user_id, u.username
      FROM draft_order d_order
      INNER JOIN rosters r ON r.id = d_order.roster_id
      LEFT JOIN users u ON u.id = r.user_id
      WHERE d_order.draft_id = $1
-     ORDER BY d_order.draft_position`,
+     ORDER BY d_order.id`,
     [draftId]
   );
 

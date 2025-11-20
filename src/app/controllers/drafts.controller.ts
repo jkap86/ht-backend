@@ -469,9 +469,9 @@ export const getDraftOrder = async (
       throw new NotFoundError("League not found or access denied");
     }
 
-    // Check if draft exists and belongs to this league
+    // Check if draft exists and belongs to this league, get settings to check if it's a derby
     const draftResult = await pool.query(
-      "SELECT id FROM drafts WHERE id = $1 AND league_id = $2",
+      "SELECT id, settings FROM drafts WHERE id = $1 AND league_id = $2",
       [draftId, leagueId]
     );
 
@@ -479,7 +479,12 @@ export const getDraftOrder = async (
       throw new NotFoundError("Draft not found");
     }
 
+    const settings = draftResult.rows[0].settings || {};
+    const isDerby = settings.draft_order === "derby";
+
     // Fetch the draft order with roster details
+    // For derby drafts, order by id to preserve picking order
+    // For regular drafts, order by draft_position
     const orderResult = await pool.query(
       `SELECT
         d_order.id,
@@ -493,7 +498,7 @@ export const getDraftOrder = async (
        INNER JOIN rosters r ON r.id = d_order.roster_id
        LEFT JOIN users u ON u.id = r.user_id
        WHERE d_order.draft_id = $1
-       ORDER BY d_order.draft_position`,
+       ORDER BY ${isDerby ? 'd_order.id' : 'd_order.draft_position'}`,
       [draftId]
     );
 
@@ -543,15 +548,18 @@ export const randomizeDraftOrder = async (
       );
     }
 
-    // Check if draft exists and belongs to this league
+    // Check if draft exists and belongs to this league, get settings to check if it's a derby
     const draftResult = await pool.query(
-      "SELECT id FROM drafts WHERE id = $1 AND league_id = $2",
+      "SELECT id, settings FROM drafts WHERE id = $1 AND league_id = $2",
       [draftId, leagueId]
     );
 
     if (draftResult.rows.length === 0) {
       throw new NotFoundError("Draft not found");
     }
+
+    const settings = draftResult.rows[0].settings || {};
+    const isDerby = settings.draft_order === "derby";
 
     // Get league info to check total_rosters
     const leagueResult = await pool.query(
@@ -628,6 +636,8 @@ export const randomizeDraftOrder = async (
     await Promise.all(insertPromises);
 
     // Fetch and return the new draft order with roster details
+    // For derby drafts, order by id to preserve picking order
+    // For regular drafts, order by draft_position
     const orderResult = await pool.query(
       `SELECT
         d_order.id,
@@ -641,7 +651,7 @@ export const randomizeDraftOrder = async (
        INNER JOIN rosters r ON r.id = d_order.roster_id
        LEFT JOIN users u ON u.id = r.user_id
        WHERE d_order.draft_id = $1
-       ORDER BY d_order.draft_position`,
+       ORDER BY ${isDerby ? 'd_order.id' : 'd_order.draft_position'}`,
       [draftId]
     );
 
@@ -852,12 +862,13 @@ export const pickDerbySlot = async (
     }
 
     // Get draft order to find current picker
+    // Order by id to preserve the original derby picking order (not draft_position which changes as people pick)
     const orderResult = await pool.query(
       `SELECT d_order.id, d_order.roster_id, d_order.draft_position, r.user_id
        FROM draft_order d_order
        INNER JOIN rosters r ON r.id = d_order.roster_id
        WHERE d_order.draft_id = $1
-       ORDER BY d_order.draft_position`,
+       ORDER BY d_order.id`,
       [draftId]
     );
 
