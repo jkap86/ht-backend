@@ -741,13 +741,8 @@ export const startDerby = async (
       );
     }
 
-    // Get the pick time from the draft
-    const pickTimeResult = await pool.query(
-      "SELECT pick_time_seconds FROM drafts WHERE id = $1",
-      [draftId]
-    );
-
-    const pickTimeSeconds = pickTimeResult.rows[0].pick_time_seconds || 60;
+    // Use derby timer seconds from settings (not pick_time_seconds)
+    const derbyTimerSeconds = settings.derby_timer_seconds || 300; // Default 5 minutes
 
     // Set derby start time to now
     const derbyStartTime = new Date();
@@ -755,7 +750,7 @@ export const startDerby = async (
     settings.derby_status = "in_progress";
     settings.current_picker_index = 0; // First person in derby order picks first
     settings.pick_deadline = new Date(
-      Date.now() + pickTimeSeconds * 1000
+      Date.now() + derbyTimerSeconds * 1000
     ).toISOString();
 
     // Update the draft with derby start time and status
@@ -914,8 +909,10 @@ export const pickDerbySlot = async (
     if (nextPickerIndex < orderResult.rows.length) {
       // More pickers to go
       settings.current_picker_index = nextPickerIndex;
+      // Use derby timer seconds from settings (not pick_time_seconds)
+      const derbyTimerSeconds = settings.derby_timer_seconds || 300;
       settings.pick_deadline = new Date(
-        Date.now() + draft.pick_time_seconds * 1000
+        Date.now() + derbyTimerSeconds * 1000
       ).toISOString();
     } else {
       // Derby complete

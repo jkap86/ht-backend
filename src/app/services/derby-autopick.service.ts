@@ -87,12 +87,21 @@ async function autoPickSlot(
     action = 'slot_skipped';
   } else {
     // Auto mode: pick a random available slot
-    // Find all available slots (slots not yet taken)
-    const takenSlots = new Set<number>();
-    for (let i = 0; i < currentPickerIndex; i++) {
-      takenSlots.add(orderResult.rows[i].draft_position);
-    }
+    // Query database to find all slots that have been taken
+    const takenSlotsResult = await pool.query(
+      `SELECT DISTINCT draft_position
+       FROM draft_order
+       WHERE draft_id = $1
+       AND draft_position IS NOT NULL
+       AND draft_position > 0`,
+      [draftId]
+    );
 
+    const takenSlots = new Set<number>(
+      takenSlotsResult.rows.map(row => row.draft_position)
+    );
+
+    // Build list of available slots
     const availableSlots: number[] = [];
     for (let i = 1; i <= orderResult.rows.length; i++) {
       if (!takenSlots.has(i)) {
