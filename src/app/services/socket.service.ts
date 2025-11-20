@@ -342,6 +342,22 @@ export class SocketService {
   }
 
   /**
+   * Emit a derby update to all users in a league
+   * Used when auto-pick or skip occurs, so clients can refresh draft state
+   */
+  public emitDerbyUpdate(leagueId: number, data: any) {
+    const roomName = `league_${leagueId}`;
+    console.log(`[SocketService] Emitting derby update to room: ${roomName}`);
+    console.log(`[SocketService] Derby update data:`, JSON.stringify(data, null, 2));
+    const sockets = this.io.sockets.adapter.rooms.get(roomName);
+    console.log(
+      `[SocketService] Number of clients in room ${roomName}:`,
+      sockets ? sockets.size : 0
+    );
+    this.io.to(roomName).emit("derby_updated", data);
+  }
+
+  /**
    * Get the Socket.IO server instance
    */
   public getIO(): Server {

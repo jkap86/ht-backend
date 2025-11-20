@@ -1,6 +1,7 @@
 // src/app/services/derby-autopick.service.ts
 import { pool } from "../../db/pool";
 import { sendSystemMessage } from "../controllers/leagueChat.controller";
+import { getSocketService } from "./socket.service";
 
 /**
  * Check all active derbies and auto-pick for expired deadlines
@@ -36,7 +37,7 @@ export const processExpiredDerbyPicks = async () => {
 };
 
 /**
- * Auto-pick a random available slot for the current picker
+ * Handle timeout for the current picker - either auto-pick or skip based on settings
  */
 async function autoPickSlot(
   draftId: number,
@@ -69,34 +70,53 @@ async function autoPickSlot(
   const currentPicker = orderResult.rows[currentPickerIndex];
   const username = currentPicker.username || `Team ${currentPicker.roster_id}`;
 
-  // Find all available slots (slots not yet taken)
-  const takenSlots = new Set<number>();
-  for (let i = 0; i < currentPickerIndex; i++) {
-    takenSlots.add(orderResult.rows[i].draft_position);
-  }
+  // Check derby_on_timeout setting (default to 'auto' if not set)
+  const onTimeoutAction = settings.derby_on_timeout || 'auto';
 
-  const availableSlots: number[] = [];
-  for (let i = 1; i <= orderResult.rows.length; i++) {
-    if (!takenSlots.has(i)) {
-      availableSlots.push(i);
+  let systemMessage = '';
+  let action = '';
+  let slotNumber = null;
+
+  if (onTimeoutAction === 'skip') {
+    // Skip mode: just move to next user without assigning a slot
+    console.log(`[Derby Auto-Pick] Skipping ${username} (time expired) in draft ${draftId}`);
+    systemMessage = `${username} was skipped (time expired)`;
+    action = 'slot_skipped';
+  } else {
+    // Auto mode: pick a random available slot
+    // Find all available slots (slots not yet taken)
+    const takenSlots = new Set<number>();
+    for (let i = 0; i < currentPickerIndex; i++) {
+      takenSlots.add(orderResult.rows[i].draft_position);
     }
+
+    const availableSlots: number[] = [];
+    for (let i = 1; i <= orderResult.rows.length; i++) {
+      if (!takenSlots.has(i)) {
+        availableSlots.push(i);
+      }
+    }
+
+    if (availableSlots.length === 0) {
+      console.error(`[Derby Auto-Pick] No available slots for draft ${draftId}`);
+      return;
+    }
+
+    // Pick a random available slot
+    const randomSlot = availableSlots[Math.floor(Math.random() * availableSlots.length)];
+    slotNumber = randomSlot;
+
+    console.log(`[Derby Auto-Pick] Auto-picking slot ${randomSlot} for ${username} in draft ${draftId}`);
+
+    // Update the draft order with the auto-picked slot
+    await pool.query(
+      `UPDATE draft_order SET draft_position = $1 WHERE id = $2`,
+      [randomSlot, currentPicker.id]
+    );
+
+    systemMessage = `${username} was auto-assigned slot ${randomSlot} (time expired)`;
+    action = 'slot_auto_picked';
   }
-
-  if (availableSlots.length === 0) {
-    console.error(`[Derby Auto-Pick] No available slots for draft ${draftId}`);
-    return;
-  }
-
-  // Pick a random available slot
-  const randomSlot = availableSlots[Math.floor(Math.random() * availableSlots.length)];
-
-  console.log(`[Derby Auto-Pick] Auto-picking slot ${randomSlot} for ${username} in draft ${draftId}`);
-
-  // Update the draft order with the auto-picked slot
-  await pool.query(
-    `UPDATE draft_order SET draft_position = $1 WHERE id = $2`,
-    [randomSlot, currentPicker.id]
-  );
 
   // Move to next picker or complete the derby
   const nextPickerIndex = currentPickerIndex + 1;
@@ -119,11 +139,31 @@ async function autoPickSlot(
   );
 
   // Send system message
+  const metadata: any = { draft_id: draftId, action };
+  if (slotNumber !== null) {
+    metadata.slot_number = slotNumber;
+  }
+
   await sendSystemMessage(
     leagueId,
-    `${username} was auto-assigned slot ${randomSlot} (time expired)`,
-    { draft_id: draftId, action: 'slot_auto_picked', slot_number: randomSlot }
+    systemMessage,
+    metadata
   );
 
-  console.log(`[Derby Auto-Pick] Successfully auto-picked slot ${randomSlot} for ${username} in draft ${draftId}`);
+  // Emit WebSocket event to notify all clients in the league
+  try {
+    const socketService = getSocketService();
+    socketService.emitDerbyUpdate(leagueId, {
+      draft_id: draftId,
+      action,
+      slot_number: slotNumber,
+      current_picker_index: settings.current_picker_index,
+      derby_status: settings.derby_status,
+      pick_deadline: settings.pick_deadline,
+    });
+  } catch (error) {
+    console.error(`[Derby Auto-Pick] Error emitting WebSocket event:`, error);
+  }
+
+  console.log(`[Derby Auto-Pick] Successfully processed timeout for ${username} in draft ${draftId} (action: ${action})`);
 }

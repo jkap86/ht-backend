@@ -74,12 +74,12 @@ server.listen(PORT, () => {
   console.log(`Backend running on port ${PORT}`);
   console.log(`WebSocket server initialized`);
 
-  // Initialize derby auto-pick cron job (runs every 5 seconds)
-  cron.schedule('*/5 * * * * *', async () => {
+  // Initialize derby auto-pick cron job (runs every 1 second for responsive timeouts)
+  cron.schedule('*/1 * * * * *', async () => {
     await processExpiredDerbyPicks();
   });
 
-  console.log(`Derby auto-pick service initialized (checks every 5 seconds)`);
+  console.log(`Derby auto-pick service initialized (checks every 1 second)`);
 });
 
 // Keep the process alive
