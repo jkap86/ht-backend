@@ -10,7 +10,7 @@ export const processExpiredDerbyPicks = async () => {
   try {
     // Find all drafts with derby in progress and expired pick deadlines
     const expiredDraftsResult = await pool.query(
-      `SELECT id, league_id, settings, pick_time_seconds
+      `SELECT id, league_id, settings
        FROM drafts
        WHERE settings->>'derby_status' = 'in_progress'
        AND settings->>'pick_deadline' IS NOT NULL
@@ -26,7 +26,9 @@ export const processExpiredDerbyPicks = async () => {
     // Process each expired draft
     for (const draft of expiredDraftsResult.rows) {
       try {
-        await autoPickSlot(draft.id, draft.league_id, draft.settings, draft.pick_time_seconds);
+        // Use derby timer seconds from settings (default to 300 seconds if not set)
+        const derbyTimerSeconds = draft.settings.derby_timer_seconds || 300;
+        await autoPickSlot(draft.id, draft.league_id, draft.settings, derbyTimerSeconds);
       } catch (error) {
         console.error(`[Derby Auto-Pick] Error processing draft ${draft.id}:`, error);
       }
@@ -43,7 +45,7 @@ async function autoPickSlot(
   draftId: number,
   leagueId: number,
   settings: any,
-  pickTimeSeconds: number
+  derbyTimerSeconds: number
 ) {
   // Get the current draft order
   const orderResult = await pool.query(
@@ -124,7 +126,7 @@ async function autoPickSlot(
   if (nextPickerIndex < orderResult.rows.length) {
     // More pickers to go
     settings.current_picker_index = nextPickerIndex;
-    settings.pick_deadline = new Date(Date.now() + pickTimeSeconds * 1000).toISOString();
+    settings.pick_deadline = new Date(Date.now() + derbyTimerSeconds * 1000).toISOString();
   } else {
     // Derby complete
     settings.derby_status = 'completed';
