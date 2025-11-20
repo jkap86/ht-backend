@@ -134,24 +134,7 @@ export const getLeagueDrafts = async (
     );
 
     // Transform snake_case to camelCase for frontend
-    const drafts = result.rows.map((row) => ({
-      id: row.id,
-      leagueId: row.league_id,
-      draftType: row.draft_type,
-      thirdRoundReversal: row.third_round_reversal,
-      status: row.status,
-      currentPick: row.current_pick,
-      currentRound: row.current_round,
-      currentRosterId: row.current_roster_id,
-      pickTimeSeconds: row.pick_time_seconds,
-      pickDeadline: row.pick_deadline,
-      rounds: row.rounds,
-      startedAt: row.started_at,
-      completedAt: row.completed_at,
-      settings: row.settings,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-    }));
+    const drafts = result.rows.map((row) => mapDraftRow(row));
 
     return res.status(200).json(drafts);
   } catch (error) {
@@ -340,6 +323,8 @@ export const updateDraft = async (
       timer_mode,
       derby_start_time,
       auto_start_derby,
+      derby_timer_seconds,
+      derby_on_timeout,
     } = req.body;
 
     // Merge with existing settings to preserve fields like derby_status, current_picker_index, etc.
@@ -367,6 +352,18 @@ export const updateDraft = async (
     if (auto_start_derby !== undefined) {
       settings.auto_start_derby = auto_start_derby;
     }
+    if (derby_timer_seconds !== undefined) {
+      settings.derby_timer_seconds = derby_timer_seconds;
+
+      // If derby is in progress and timer was updated, recalculate pick_deadline
+      if (settings.derby_status === 'in_progress' && settings.pick_deadline) {
+        const now = new Date();
+        settings.pick_deadline = new Date(now.getTime() + derby_timer_seconds * 1000);
+      }
+    }
+    if (derby_on_timeout !== undefined) {
+      settings.derby_on_timeout = derby_on_timeout;
+    }
 
     const result = await pool.query<DraftRow>(
       `UPDATE drafts SET
@@ -375,6 +372,7 @@ export const updateDraft = async (
         rounds = COALESCE($3, rounds),
         pick_time_seconds = COALESCE($4, pick_time_seconds),
         settings = COALESCE($5, settings),
+        pick_deadline = $8,
         updated_at = CURRENT_TIMESTAMP
       WHERE id = $6 AND league_id = $7
       RETURNING *`,
@@ -386,6 +384,7 @@ export const updateDraft = async (
         JSON.stringify(settings),
         draftId,
         leagueId,
+        settings.pick_deadline || null,
       ]
     );
 
@@ -498,7 +497,7 @@ export const getDraftOrder = async (
        INNER JOIN rosters r ON r.id = d_order.roster_id
        LEFT JOIN users u ON u.id = r.user_id
        WHERE d_order.draft_id = $1
-       ORDER BY ${isDerby ? 'd_order.id' : 'd_order.draft_position'}`,
+       ORDER BY ${isDerby ? "d_order.id" : "d_order.draft_position"}`,
       [draftId]
     );
 
@@ -651,7 +650,7 @@ export const randomizeDraftOrder = async (
        INNER JOIN rosters r ON r.id = d_order.roster_id
        LEFT JOIN users u ON u.id = r.user_id
        WHERE d_order.draft_id = $1
-       ORDER BY ${isDerby ? 'd_order.id' : 'd_order.draft_position'}`,
+       ORDER BY ${isDerby ? "d_order.id" : "d_order.draft_position"}`,
       [draftId]
     );
 
@@ -780,25 +779,8 @@ export const startDerby = async (
     );
 
     // Return the updated draft object
-    const updatedDraft = updateResult.rows[0];
-    return res.status(200).json({
-      id: updatedDraft.id,
-      leagueId: updatedDraft.league_id,
-      draftType: updatedDraft.draft_type,
-      thirdRoundReversal: updatedDraft.third_round_reversal,
-      status: updatedDraft.status,
-      currentPick: updatedDraft.current_pick,
-      currentRound: updatedDraft.current_round,
-      currentRosterId: updatedDraft.current_roster_id,
-      pickTimeSeconds: updatedDraft.pick_time_seconds,
-      pickDeadline: updatedDraft.pick_deadline,
-      rounds: updatedDraft.rounds,
-      startedAt: updatedDraft.started_at,
-      completedAt: updatedDraft.completed_at,
-      settings: updatedDraft.settings,
-      createdAt: updatedDraft.created_at,
-      updatedAt: updatedDraft.updated_at,
-    });
+    const updatedDraft = mapDraftRow(updateResult.rows[0]);
+    return res.status(200).json(updatedDraft);
   } catch (error) {
     next(error);
   }
