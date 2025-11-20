@@ -225,6 +225,8 @@ export const createDraft = async (
       timer_mode,
       derby_start_time,
       auto_start_derby,
+      derby_timer_seconds,
+      derby_on_timeout,
     } = req.body;
 
     // Validate required fields
@@ -247,6 +249,12 @@ export const createDraft = async (
     }
     if (auto_start_derby !== undefined) {
       settings.auto_start_derby = auto_start_derby;
+    }
+    if (derby_timer_seconds !== undefined) {
+      settings.derby_timer_seconds = derby_timer_seconds;
+    }
+    if (derby_on_timeout !== undefined) {
+      settings.derby_on_timeout = derby_on_timeout;
     }
 
     const result = await pool.query<DraftRow>(
