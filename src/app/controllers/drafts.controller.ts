@@ -240,8 +240,8 @@ export const createDraft = async (
     const result = await pool.query<DraftRow>(
       `INSERT INTO drafts (
         league_id, draft_type, third_round_reversal, rounds,
-        pick_time_seconds, settings, status
-      ) VALUES ($1, $2, $3, $4, $5, $6, 'not_started')
+        pick_time_seconds, settings, status, current_roster_id
+      ) VALUES ($1, $2, $3, $4, $5, $6, 'not_started', NULL)
       RETURNING *`,
       [
         leagueId,
