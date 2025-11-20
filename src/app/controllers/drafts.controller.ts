@@ -2,7 +2,11 @@
 import { Response, NextFunction } from "express";
 import { pool } from "../../db/pool";
 import { AuthRequest } from "../middleware/auth.middleware";
-import { NotFoundError, ValidationError, ForbiddenError } from "../utils/errors";
+import {
+  NotFoundError,
+  ValidationError,
+  ForbiddenError,
+} from "../utils/errors";
 import { sendSystemMessage } from "./leagueChat.controller";
 
 interface DraftRow {
@@ -24,10 +28,43 @@ interface DraftRow {
   updated_at: Date;
 }
 
+function mapDraftRow(row: DraftRow) {
+  const settings: any = row.settings || {};
+
+  const settingsPickDeadline = settings.pick_deadline as string | undefined;
+
+  // Prefer the JSON settings pick_deadline (used by derby), fall back to column
+  const pickDeadline: Date | null = settingsPickDeadline
+    ? new Date(settingsPickDeadline)
+    : row.pick_deadline;
+
+  return {
+    id: row.id,
+    leagueId: row.league_id,
+    draftType: row.draft_type,
+    thirdRoundReversal: row.third_round_reversal,
+    status: row.status,
+    currentPick: row.current_pick,
+    currentRound: row.current_round,
+    currentRosterId: row.current_roster_id,
+    pickTimeSeconds: row.pick_time_seconds,
+    pickDeadline, // <- now comes from settings for derby
+    rounds: row.rounds,
+    startedAt: row.started_at,
+    completedAt: row.completed_at,
+    settings: row.settings,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
 /**
  * Helper: Check if user is commissioner of a league
  */
-async function isCommissioner(leagueId: number, userId: string): Promise<boolean> {
+async function isCommissioner(
+  leagueId: number,
+  userId: string
+): Promise<boolean> {
   const result = await pool.query(
     `SELECT l.settings->>'commissioner_roster_id' as commissioner_roster_id,
             r.roster_id
@@ -42,14 +79,20 @@ async function isCommissioner(leagueId: number, userId: string): Promise<boolean
   }
 
   const row = result.rows[0];
-  return row.commissioner_roster_id && row.roster_id &&
-         row.commissioner_roster_id === row.roster_id.toString();
+  return (
+    row.commissioner_roster_id &&
+    row.roster_id &&
+    row.commissioner_roster_id === row.roster_id.toString()
+  );
 }
 
 /**
  * Helper: Check if user has access to league
  */
-async function hasLeagueAccess(leagueId: number, userId: string): Promise<boolean> {
+async function hasLeagueAccess(
+  leagueId: number,
+  userId: string
+): Promise<boolean> {
   const result = await pool.query(
     "SELECT id FROM rosters WHERE league_id = $1 AND user_id = $2",
     [leagueId, userId]
@@ -91,7 +134,7 @@ export const getLeagueDrafts = async (
     );
 
     // Transform snake_case to camelCase for frontend
-    const drafts = result.rows.map(row => ({
+    const drafts = result.rows.map((row) => ({
       id: row.id,
       leagueId: row.league_id,
       draftType: row.draft_type,
@@ -154,24 +197,8 @@ export const getDraft = async (
 
     // Transform snake_case to camelCase for frontend
     const row = result.rows[0];
-    const draft = {
-      id: row.id,
-      leagueId: row.league_id,
-      draftType: row.draft_type,
-      thirdRoundReversal: row.third_round_reversal,
-      status: row.status,
-      currentPick: row.current_pick,
-      currentRound: row.current_round,
-      currentRosterId: row.current_roster_id,
-      pickTimeSeconds: row.pick_time_seconds,
-      pickDeadline: row.pick_deadline,
-      rounds: row.rounds,
-      startedAt: row.started_at,
-      completedAt: row.completed_at,
-      settings: row.settings,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-    };
+
+    const draft = mapDraftRow(row);
 
     return res.status(200).json(draft);
   } catch (error) {
@@ -219,14 +246,16 @@ export const createDraft = async (
 
     // Validate required fields
     if (!draft_type || !rounds || !pick_time_seconds) {
-      throw new ValidationError("Missing required fields: draft_type, rounds, pick_time_seconds");
+      throw new ValidationError(
+        "Missing required fields: draft_type, rounds, pick_time_seconds"
+      );
     }
 
     // Build settings object
     const settings: any = {
-      player_pool: player_pool || 'all',
-      draft_order: draft_order || 'randomize',
-      timer_mode: timer_mode || 'per_pick',
+      player_pool: player_pool || "all",
+      draft_order: draft_order || "randomize",
+      timer_mode: timer_mode || "per_pick",
     };
 
     // Add derby-specific fields if provided
@@ -255,24 +284,8 @@ export const createDraft = async (
 
     // Transform snake_case to camelCase for frontend
     const row = result.rows[0];
-    const draft = {
-      id: row.id,
-      leagueId: row.league_id,
-      draftType: row.draft_type,
-      thirdRoundReversal: row.third_round_reversal,
-      status: row.status,
-      currentPick: row.current_pick,
-      currentRound: row.current_round,
-      currentRosterId: row.current_roster_id,
-      pickTimeSeconds: row.pick_time_seconds,
-      pickDeadline: row.pick_deadline,
-      rounds: row.rounds,
-      startedAt: row.started_at,
-      completedAt: row.completed_at,
-      settings: row.settings,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-    };
+
+    const draft = mapDraftRow(row);
 
     return res.status(201).json(draft);
   } catch (error) {
@@ -333,9 +346,18 @@ export const updateDraft = async (
     const existingSettings = checkResult.rows[0].settings || {};
     const settings: any = {
       ...existingSettings,
-      player_pool: player_pool !== undefined ? player_pool : (existingSettings.player_pool || 'all'),
-      draft_order: draft_order !== undefined ? draft_order : (existingSettings.draft_order || 'randomize'),
-      timer_mode: timer_mode !== undefined ? timer_mode : (existingSettings.timer_mode || 'per_pick'),
+      player_pool:
+        player_pool !== undefined
+          ? player_pool
+          : existingSettings.player_pool || "all",
+      draft_order:
+        draft_order !== undefined
+          ? draft_order
+          : existingSettings.draft_order || "randomize",
+      timer_mode:
+        timer_mode !== undefined
+          ? timer_mode
+          : existingSettings.timer_mode || "per_pick",
     };
 
     // Add derby-specific fields if provided
@@ -369,24 +391,8 @@ export const updateDraft = async (
 
     // Transform snake_case to camelCase for frontend
     const row = result.rows[0];
-    const draft = {
-      id: row.id,
-      leagueId: row.league_id,
-      draftType: row.draft_type,
-      thirdRoundReversal: row.third_round_reversal,
-      status: row.status,
-      currentPick: row.current_pick,
-      currentRound: row.current_round,
-      currentRosterId: row.current_roster_id,
-      pickTimeSeconds: row.pick_time_seconds,
-      pickDeadline: row.pick_deadline,
-      rounds: row.rounds,
-      startedAt: row.started_at,
-      completedAt: row.completed_at,
-      settings: row.settings,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-    };
+
+    const draft = mapDraftRow(row);
 
     return res.status(200).json(draft);
   } catch (error) {
@@ -492,7 +498,7 @@ export const getDraftOrder = async (
     );
 
     // Transform snake_case to camelCase for frontend
-    const draftOrder = orderResult.rows.map(row => ({
+    const draftOrder = orderResult.rows.map((row) => ({
       id: row.id,
       draftId: row.draft_id,
       rosterId: row.roster_id,
@@ -532,7 +538,9 @@ export const randomizeDraftOrder = async (
 
     // Check if user is commissioner
     if (!(await isCommissioner(leagueId, userId))) {
-      throw new ForbiddenError("Only the commissioner can randomize draft order");
+      throw new ForbiddenError(
+        "Only the commissioner can randomize draft order"
+      );
     }
 
     // Check if draft exists and belongs to this league
@@ -566,7 +574,9 @@ export const randomizeDraftOrder = async (
     );
 
     // Create missing rosters if needed (for teams without managers in derby drafts)
-    const existingRosterIds = new Set(rostersResult.rows.map(r => r.roster_id));
+    const existingRosterIds = new Set(
+      rostersResult.rows.map((r) => r.roster_id)
+    );
     const missingRosterIds = [];
 
     for (let i = 1; i <= totalRosters; i++) {
@@ -597,10 +607,7 @@ export const randomizeDraftOrder = async (
     }
 
     // Delete existing draft order if any
-    await pool.query(
-      "DELETE FROM draft_order WHERE draft_id = $1",
-      [draftId]
-    );
+    await pool.query("DELETE FROM draft_order WHERE draft_id = $1", [draftId]);
 
     // Shuffle the rosters array (Fisher-Yates shuffle)
     const rosters = [...allRostersResult.rows];
@@ -641,16 +648,16 @@ export const randomizeDraftOrder = async (
     // Send system message to league chat
     const orderSummary = orderResult.rows
       .map((item, index) => `${index + 1}. ${item.username}`)
-      .join('\n');
+      .join("\n");
 
     await sendSystemMessage(
       leagueId,
       `Draft order has been randomized!\n\n${orderSummary}`,
-      { draft_id: draftId, action: 'draft_order_randomized' }
+      { draft_id: draftId, action: "draft_order_randomized" }
     );
 
     // Transform snake_case to camelCase for frontend
-    const draftOrder = orderResult.rows.map(row => ({
+    const draftOrder = orderResult.rows.map((row) => ({
       id: row.id,
       draftId: row.draft_id,
       rosterId: row.roster_id,
@@ -706,8 +713,10 @@ export const startDerby = async (
     const draft = draftResult.rows[0];
     const settings = draft.settings || {};
 
-    if (settings.draft_order !== 'derby') {
-      throw new ValidationError("This endpoint is only for derby drafts (draft_order must be 'derby')");
+    if (settings.draft_order !== "derby") {
+      throw new ValidationError(
+        "This endpoint is only for derby drafts (draft_order must be 'derby')"
+      );
     }
 
     // Check if draft order has been randomized
@@ -717,7 +726,9 @@ export const startDerby = async (
     );
 
     if (parseInt(orderCheck.rows[0].count) === 0) {
-      throw new ValidationError("Derby order must be randomized before starting");
+      throw new ValidationError(
+        "Derby order must be randomized before starting"
+      );
     }
 
     // Get the pick time from the draft
@@ -731,17 +742,21 @@ export const startDerby = async (
     // Set derby start time to now
     const derbyStartTime = new Date();
     settings.derby_start_time = derbyStartTime.toISOString();
-    settings.derby_status = 'in_progress';
+    settings.derby_status = "in_progress";
     settings.current_picker_index = 0; // First person in derby order picks first
-    settings.pick_deadline = new Date(Date.now() + pickTimeSeconds * 1000).toISOString();
+    settings.pick_deadline = new Date(
+      Date.now() + pickTimeSeconds * 1000
+    ).toISOString();
 
     // Update the draft with derby start time and status
-    await pool.query(
+    const updateResult = await pool.query<DraftRow>(
       `UPDATE drafts
        SET settings = $1,
-           updated_at = CURRENT_TIMESTAMP
-       WHERE id = $2`,
-      [JSON.stringify(settings), draftId]
+           updated_at = CURRENT_TIMESTAMP,
+           pick_deadline = $2
+       WHERE id = $3
+       RETURNING *`,
+      [JSON.stringify(settings), settings.pick_deadline, draftId]
     );
 
     // Get username for system message
@@ -750,19 +765,34 @@ export const startDerby = async (
       [userId]
     );
 
-    const username = userResult.rows[0]?.username || 'Commissioner';
+    const username = userResult.rows[0]?.username || "Commissioner";
 
     // Send system message
     await sendSystemMessage(
       leagueId,
       `${username} started the derby! Users can now select their draft positions.`,
-      { draft_id: draftId, action: 'derby_started' }
+      { draft_id: draftId, action: "derby_started" }
     );
 
+    // Return the updated draft object
+    const updatedDraft = updateResult.rows[0];
     return res.status(200).json({
-      message: 'Derby started successfully',
-      derby_start_time: derbyStartTime.toISOString(),
-      pick_time_seconds: pickTimeSeconds,
+      id: updatedDraft.id,
+      leagueId: updatedDraft.league_id,
+      draftType: updatedDraft.draft_type,
+      thirdRoundReversal: updatedDraft.third_round_reversal,
+      status: updatedDraft.status,
+      currentPick: updatedDraft.current_pick,
+      currentRound: updatedDraft.current_round,
+      currentRosterId: updatedDraft.current_roster_id,
+      pickTimeSeconds: updatedDraft.pick_time_seconds,
+      pickDeadline: updatedDraft.pick_deadline,
+      rounds: updatedDraft.rounds,
+      startedAt: updatedDraft.started_at,
+      completedAt: updatedDraft.completed_at,
+      settings: updatedDraft.settings,
+      createdAt: updatedDraft.created_at,
+      updatedAt: updatedDraft.updated_at,
     });
   } catch (error) {
     next(error);
@@ -811,11 +841,13 @@ export const pickDerbySlot = async (
     const draft = draftResult.rows[0];
     const settings = draft.settings || {};
 
-    if (settings.draft_order !== 'derby') {
-      throw new ValidationError("This endpoint is only for derby drafts (draft_order must be 'derby')");
+    if (settings.draft_order !== "derby") {
+      throw new ValidationError(
+        "This endpoint is only for derby drafts (draft_order must be 'derby')"
+      );
     }
 
-    if (settings.derby_status !== 'in_progress') {
+    if (settings.derby_status !== "in_progress") {
       throw new ValidationError("Derby is not in progress");
     }
 
@@ -843,7 +875,9 @@ export const pickDerbySlot = async (
 
     // Validate slot number
     if (slotNumber < 1 || slotNumber > orderResult.rows.length) {
-      throw new ValidationError(`Slot number must be between 1 and ${orderResult.rows.length}`);
+      throw new ValidationError(
+        `Slot number must be between 1 and ${orderResult.rows.length}`
+      );
     }
 
     // Check if slot is already taken
@@ -869,10 +903,12 @@ export const pickDerbySlot = async (
     if (nextPickerIndex < orderResult.rows.length) {
       // More pickers to go
       settings.current_picker_index = nextPickerIndex;
-      settings.pick_deadline = new Date(Date.now() + draft.pick_time_seconds * 1000).toISOString();
+      settings.pick_deadline = new Date(
+        Date.now() + draft.pick_time_seconds * 1000
+      ).toISOString();
     } else {
       // Derby complete
-      settings.derby_status = 'completed';
+      settings.derby_status = "completed";
       delete settings.current_picker_index;
       delete settings.pick_deadline;
     }
@@ -889,17 +925,17 @@ export const pickDerbySlot = async (
       [userId]
     );
 
-    const username = userResult.rows[0]?.username || 'User';
+    const username = userResult.rows[0]?.username || "User";
 
     // Send system message
     await sendSystemMessage(
       leagueId,
       `${username} selected slot ${slotNumber}`,
-      { draft_id: draftId, action: 'slot_picked', slot_number: slotNumber }
+      { draft_id: draftId, action: "slot_picked", slot_number: slotNumber }
     );
 
     return res.status(200).json({
-      message: 'Slot picked successfully',
+      message: "Slot picked successfully",
       slot_number: slotNumber,
       derby_status: settings.derby_status,
     });
@@ -948,16 +984,16 @@ export const pauseDerby = async (
     const draft = draftResult.rows[0];
     const settings = draft.settings || {};
 
-    if (settings.draft_order !== 'derby') {
+    if (settings.draft_order !== "derby") {
       throw new ValidationError("This endpoint is only for derby drafts");
     }
 
-    if (settings.derby_status !== 'in_progress') {
+    if (settings.derby_status !== "in_progress") {
       throw new ValidationError("Derby is not in progress");
     }
 
     // Pause the derby
-    settings.derby_status = 'paused';
+    settings.derby_status = "paused";
     delete settings.pick_deadline; // Remove the deadline when paused
 
     const result = await pool.query<DraftRow>(
@@ -971,35 +1007,18 @@ export const pauseDerby = async (
       [userId]
     );
 
-    const username = userResult.rows[0]?.username || 'Commissioner';
+    const username = userResult.rows[0]?.username || "Commissioner";
 
     // Send system message
-    await sendSystemMessage(
-      leagueId,
-      `${username} paused the derby`,
-      { draft_id: draftId, action: 'derby_paused' }
-    );
+    await sendSystemMessage(leagueId, `${username} paused the derby`, {
+      draft_id: draftId,
+      action: "derby_paused",
+    });
 
     // Transform snake_case to camelCase for frontend
     const row = result.rows[0];
-    const updatedDraft = {
-      id: row.id,
-      leagueId: row.league_id,
-      draftType: row.draft_type,
-      thirdRoundReversal: row.third_round_reversal,
-      status: row.status,
-      currentPick: row.current_pick,
-      currentRound: row.current_round,
-      currentRosterId: row.current_roster_id,
-      pickTimeSeconds: row.pick_time_seconds,
-      pickDeadline: row.pick_deadline,
-      rounds: row.rounds,
-      startedAt: row.started_at,
-      completedAt: row.completed_at,
-      settings: row.settings,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-    };
+
+    const updatedDraft = mapDraftRow(row);
 
     return res.status(200).json(updatedDraft);
   } catch (error) {
@@ -1047,17 +1066,19 @@ export const resumeDerby = async (
     const draft = draftResult.rows[0];
     const settings = draft.settings || {};
 
-    if (settings.draft_order !== 'derby') {
+    if (settings.draft_order !== "derby") {
       throw new ValidationError("This endpoint is only for derby drafts");
     }
 
-    if (settings.derby_status !== 'paused') {
+    if (settings.derby_status !== "paused") {
       throw new ValidationError("Derby is not paused");
     }
 
     // Resume the derby
-    settings.derby_status = 'in_progress';
-    settings.pick_deadline = new Date(Date.now() + draft.pick_time_seconds * 1000).toISOString();
+    settings.derby_status = "in_progress";
+    settings.pick_deadline = new Date(
+      Date.now() + draft.pick_time_seconds * 1000
+    ).toISOString();
 
     const result = await pool.query<DraftRow>(
       `UPDATE drafts SET settings = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING *`,
@@ -1070,35 +1091,18 @@ export const resumeDerby = async (
       [userId]
     );
 
-    const username = userResult.rows[0]?.username || 'Commissioner';
+    const username = userResult.rows[0]?.username || "Commissioner";
 
     // Send system message
-    await sendSystemMessage(
-      leagueId,
-      `${username} resumed the derby`,
-      { draft_id: draftId, action: 'derby_resumed' }
-    );
+    await sendSystemMessage(leagueId, `${username} resumed the derby`, {
+      draft_id: draftId,
+      action: "derby_resumed",
+    });
 
     // Transform snake_case to camelCase for frontend
     const row = result.rows[0];
-    const updatedDraft = {
-      id: row.id,
-      leagueId: row.league_id,
-      draftType: row.draft_type,
-      thirdRoundReversal: row.third_round_reversal,
-      status: row.status,
-      currentPick: row.current_pick,
-      currentRound: row.current_round,
-      currentRosterId: row.current_roster_id,
-      pickTimeSeconds: row.pick_time_seconds,
-      pickDeadline: row.pick_deadline,
-      rounds: row.rounds,
-      startedAt: row.started_at,
-      completedAt: row.completed_at,
-      settings: row.settings,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-    };
+
+    const updatedDraft = mapDraftRow(row);
 
     return res.status(200).json(updatedDraft);
   } catch (error) {
