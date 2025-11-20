@@ -632,11 +632,13 @@ export const randomizeDraftOrder = async (
     }
 
     // Insert randomized draft order
+    // For derby drafts, set draft_position to NULL initially (users will pick their slots)
+    // For regular drafts, assign sequential positions
     const insertPromises = rosters.map((roster, index) => {
       return pool.query(
         `INSERT INTO draft_order (draft_id, roster_id, draft_position)
          VALUES ($1, $2, $3)`,
-        [draftId, roster.id, index + 1]
+        [draftId, roster.id, isDerby ? null : index + 1]
       );
     });
 
@@ -911,10 +913,10 @@ export const pickDerbySlot = async (
       delete settings.pick_deadline;
     }
 
-    // Update draft settings
+    // Update draft settings and pick_deadline column
     await pool.query(
-      `UPDATE drafts SET settings = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
-      [JSON.stringify(settings), draftId]
+      `UPDATE drafts SET settings = $1, pick_deadline = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3`,
+      [JSON.stringify(settings), settings.pick_deadline || null, draftId]
     );
 
     // Get username for system message

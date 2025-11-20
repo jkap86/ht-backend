@@ -9,12 +9,13 @@ import { getSocketService } from "./socket.service";
 export const processExpiredDerbyPicks = async () => {
   try {
     // Find all drafts with derby in progress and expired pick deadlines
+    // Use the pick_deadline column (more reliable than JSON field)
     const expiredDraftsResult = await pool.query(
       `SELECT id, league_id, settings
        FROM drafts
        WHERE settings->>'derby_status' = 'in_progress'
-       AND settings->>'pick_deadline' IS NOT NULL
-       AND (settings->>'pick_deadline')::timestamp < NOW()`
+       AND pick_deadline IS NOT NULL
+       AND pick_deadline < NOW()`
     );
 
     if (expiredDraftsResult.rows.length === 0) {
@@ -144,10 +145,10 @@ async function autoPickSlot(
     delete settings.pick_deadline;
   }
 
-  // Update draft settings
+  // Update draft settings and pick_deadline column
   await pool.query(
-    `UPDATE drafts SET settings = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
-    [JSON.stringify(settings), draftId]
+    `UPDATE drafts SET settings = $1, pick_deadline = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3`,
+    [JSON.stringify(settings), settings.pick_deadline || null, draftId]
   );
 
   // Send system message
