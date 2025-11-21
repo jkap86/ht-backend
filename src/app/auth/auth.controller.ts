@@ -6,7 +6,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { Container } from '../../infrastructure/di/Container';
 import { AuthService } from '../../application/services/AuthService';
-import { AuthRequest } from '../middleware/auth.middleware';
+import { AuthRequest } from '../common/middleware/auth.middleware';
 import {
   AuthResponse,
   MeResponse,

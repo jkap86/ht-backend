@@ -1,6 +1,6 @@
-// src/app/routes/leagues.routes.ts
+// src/app/leagues/leagues.routes.ts
 import { Router } from "express";
-import { authMiddleware } from "../middleware/auth.middleware";
+import { authMiddleware } from "../common/middleware/auth.middleware";
 import {
   getMyLeagues,
   getLeague,
@@ -12,11 +12,11 @@ import {
   devAddUsersToLeague,
   getLeagueMembers,
   toggleMemberPayment,
-} from "../controllers/leagues.controller";
+} from "./leagues.controller";
 import {
   getChatMessages,
   sendChatMessage,
-} from "../controllers/leagueChat.controller";
+} from "./leagueChat.controller";
 
 const router = Router();
 

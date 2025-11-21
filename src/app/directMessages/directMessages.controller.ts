@@ -1,7 +1,7 @@
-// src/app/controllers/directMessages.controller.ts
+// src/app/directMessages/directMessages.controller.ts
 import { Response, NextFunction } from "express";
-import { AuthRequest } from "../middleware/auth.middleware";
-import { ValidationError, NotFoundError } from "../utils/errors";
+import { AuthRequest } from "../common/middleware/auth.middleware";
+import { ValidationError, NotFoundError } from "../common/utils/errors";
 import { ChatService } from "../../application/services/ChatService";
 import { Container } from "../../infrastructure/di/Container";
 

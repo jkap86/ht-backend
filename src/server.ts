@@ -6,7 +6,7 @@ import cron from "node-cron";
 
 import { pool } from "./db/pool";
 import { Container } from "./infrastructure/di/Container";
-import { errorHandler } from "./app/middleware/error.middleware";
+import { errorHandler } from "./app/common/middleware/error.middleware";
 import { initializeSocketService } from "./app/runtime/socket/socket.service";
 import { processExpiredDerbyPicks } from "./app/runtime/jobs/derby-autopick.service";
 import { processExpiredDraftPicks } from "./app/runtime/jobs/draft-autopick.service";

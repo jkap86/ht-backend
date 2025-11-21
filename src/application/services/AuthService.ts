@@ -6,7 +6,7 @@ import {
   InvalidCredentialsException,
   ConflictException,
 } from '../../domain/exceptions/AuthExceptions';
-import { signToken, verifyToken } from '../../app/utils/jwt';
+import { signToken, verifyToken } from '../../app/common/utils/jwt';
 
 /**
  * Authentication Service

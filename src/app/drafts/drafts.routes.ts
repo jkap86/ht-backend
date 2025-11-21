@@ -1,6 +1,6 @@
-// src/app/routes/drafts.routes.ts
+// src/app/drafts/drafts.routes.ts
 import { Router } from "express";
-import { authMiddleware } from "../middleware/auth.middleware";
+import { authMiddleware } from "../common/middleware/auth.middleware";
 import {
   getLeagueDrafts,
   getDraft,
@@ -20,7 +20,7 @@ import {
   getDraftPicks,
   getAvailablePlayers,
   getDraftState,
-} from "../controllers/drafts.controller";
+} from "./drafts.controller";
 
 const router = Router();
 

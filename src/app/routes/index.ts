@@ -1,10 +1,10 @@
 // src/app/routes/index.ts
 import { Router } from "express";
-import healthRoutes from "./health.routes";
-import authRoutes from "./auth.routes";
-import leaguesRoutes from "./leagues.routes";
-import directMessagesRoutes from "./directMessages.routes";
-import draftsRoutes from "./drafts.routes";
+import healthRoutes from "../common/routes/health.routes";
+import authRoutes from "../auth/auth.routes";
+import leaguesRoutes from "../leagues/leagues.routes";
+import directMessagesRoutes from "../directMessages/directMessages.routes";
+import draftsRoutes from "../drafts/drafts.routes";
 
 const router = Router();
 

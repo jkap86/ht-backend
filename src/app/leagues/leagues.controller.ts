@@ -1,7 +1,7 @@
-// src/app/controllers/leagues.controller.ts
+// src/app/leagues/leagues.controller.ts
 import { Response, NextFunction } from 'express';
-import { AuthRequest } from '../middleware/auth.middleware';
-import { ValidationError } from '../utils/errors';
+import { AuthRequest } from '../common/middleware/auth.middleware';
+import { ValidationError } from '../common/utils/errors';
 import { Container } from '../../infrastructure/di/Container';
 import { LeagueService } from '../../application/services/LeagueService';
 

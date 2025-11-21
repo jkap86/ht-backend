@@ -1,5 +1,5 @@
 // src/app/validators/auth.validator.ts
-import { ValidationError } from "../utils/errors";
+import { ValidationError } from "../common/utils/errors";
 
 export class AuthValidator {
   private static readonly USERNAME_MIN_LENGTH = 3;

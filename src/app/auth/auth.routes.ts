@@ -1,8 +1,8 @@
-// src/app/routes/auth.routes.ts
+// src/app/auth/auth.routes.ts
 import { Router } from "express";
 import rateLimit from "express-rate-limit";
-import { login, register, me, refresh, searchUsers } from "../controllers/auth.controller";
-import { authMiddleware } from "../middleware/auth.middleware";
+import { login, register, me, refresh, searchUsers } from "./auth.controller";
+import { authMiddleware } from "../common/middleware/auth.middleware";
 
 const router = Router();
 

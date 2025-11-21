@@ -1,7 +1,7 @@
-// src/app/controllers/leagueChat.controller.ts
+// src/app/leagues/leagueChat.controller.ts
 import { Response, NextFunction } from "express";
-import { AuthRequest } from "../middleware/auth.middleware";
-import { NotFoundError, ValidationError } from "../utils/errors";
+import { AuthRequest } from "../common/middleware/auth.middleware";
+import { NotFoundError, ValidationError } from "../common/utils/errors";
 import { ChatService } from "../../application/services/ChatService";
 import { Container } from "../../infrastructure/di/Container";
 

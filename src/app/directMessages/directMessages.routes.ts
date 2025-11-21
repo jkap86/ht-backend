@@ -1,11 +1,11 @@
-// src/app/routes/directMessages.routes.ts
+// src/app/directMessages/directMessages.routes.ts
 import { Router } from 'express';
-import { authMiddleware } from '../middleware/auth.middleware';
+import { authMiddleware } from '../common/middleware/auth.middleware';
 import {
   getConversations,
   getMessages,
   sendMessage,
-} from '../controllers/directMessages.controller';
+} from './directMessages.controller';
 
 const router = Router();
 

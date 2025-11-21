@@ -1,7 +1,7 @@
-// src/app/middleware/error.middleware.ts
+// src/app/common/middleware/error.middleware.ts
 import { Request, Response, NextFunction } from "express";
 import { AppError } from "../utils/errors";
-import { AuthException } from "../../domain/exceptions/AuthExceptions";
+import { AuthException } from "../../../domain/exceptions/AuthExceptions";
 
 export const errorHandler = (
   err: Error | AppError | AuthException,

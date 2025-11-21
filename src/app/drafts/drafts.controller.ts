@@ -1,12 +1,12 @@
-// src/app/controllers/drafts.controller.ts
+// src/app/drafts/drafts.controller.ts
 import { Response, NextFunction } from "express";
 import { pool } from "../../db/pool";
-import { AuthRequest } from "../middleware/auth.middleware";
+import { AuthRequest } from "../common/middleware/auth.middleware";
 import {
   NotFoundError,
   ValidationError,
   ForbiddenError,
-} from "../utils/errors";
+} from "../common/utils/errors";
 import { Container } from "../../infrastructure/di/Container";
 import { ChatService } from "../../application/services/ChatService";
 
