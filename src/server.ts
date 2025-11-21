@@ -9,6 +9,8 @@ import { Container } from "./infrastructure/di/Container";
 import { errorHandler } from "./app/middleware/error.middleware";
 import { initializeSocketService } from "./app/services/socket.service";
 import { processExpiredDerbyPicks } from "./app/services/derby-autopick.service";
+import { processExpiredDraftPicks } from "./app/services/draft-autopick.service";
+import { syncPlayersFromSleeper } from "./app/services/player-sync.service";
 
 dotenv.config();
 
@@ -80,6 +82,20 @@ server.listen(PORT, () => {
   });
 
   console.log(`Derby auto-pick service initialized (checks every 1 second)`);
+
+  // Initialize draft auto-pick cron job (runs every 5 seconds for responsive timeouts)
+  cron.schedule('*/5 * * * * *', async () => {
+    await processExpiredDraftPicks();
+  });
+
+  console.log(`Draft auto-pick service initialized (checks every 5 seconds)`);
+
+  // Initialize player sync cron job (runs every 12 hours)
+  cron.schedule('0 */12 * * *', async () => {
+    await syncPlayersFromSleeper();
+  });
+
+  console.log(`Player sync service initialized (runs every 12 hours)`);
 });
 
 // Keep the process alive

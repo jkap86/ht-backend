@@ -13,6 +13,13 @@ import {
   pickDerbySlot,
   pauseDerby,
   resumeDerby,
+  startDraft,
+  pauseDraftRoom,
+  resumeDraftRoom,
+  makePick,
+  getDraftPicks,
+  getAvailablePlayers,
+  getDraftState,
 } from "../controllers/drafts.controller";
 
 const router = Router();
@@ -52,5 +59,30 @@ router.put("/:leagueId/drafts/:draftId", updateDraft);
 
 // DELETE /api/leagues/:leagueId/drafts/:draftId - Delete a draft (commissioner only)
 router.delete("/:leagueId/drafts/:draftId", deleteDraft);
+
+// ==============================
+// DRAFT ROOM (Player Selection)
+// ==============================
+
+// GET /api/leagues/:leagueId/drafts/:draftId/state - Get current draft state
+router.get("/:leagueId/drafts/:draftId/state", getDraftState);
+
+// GET /api/leagues/:leagueId/drafts/:draftId/picks - Get all picks
+router.get("/:leagueId/drafts/:draftId/picks", getDraftPicks);
+
+// GET /api/leagues/:leagueId/drafts/:draftId/available-players - Get available players
+router.get("/:leagueId/drafts/:draftId/available-players", getAvailablePlayers);
+
+// POST /api/leagues/:leagueId/drafts/:draftId/start - Start the draft (commissioner only)
+router.post("/:leagueId/drafts/:draftId/start", startDraft);
+
+// POST /api/leagues/:leagueId/drafts/:draftId/pause - Pause the draft (commissioner only)
+router.post("/:leagueId/drafts/:draftId/pause", pauseDraftRoom);
+
+// POST /api/leagues/:leagueId/drafts/:draftId/resume - Resume the draft (commissioner only)
+router.post("/:leagueId/drafts/:draftId/resume", resumeDraftRoom);
+
+// POST /api/leagues/:leagueId/drafts/:draftId/pick - Make a player pick (user's turn only)
+router.post("/:leagueId/drafts/:draftId/pick", makePick);
 
 export default router;

@@ -914,8 +914,8 @@ export const pickDerbySlot = async (
     }
 
     // Update draft settings and pick_deadline column
-    await pool.query(
-      `UPDATE drafts SET settings = $1, pick_deadline = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3`,
+    const updateResult = await pool.query<DraftRow>(
+      `UPDATE drafts SET settings = $1, pick_deadline = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3 RETURNING *`,
       [JSON.stringify(settings), settings.pick_deadline || null, draftId]
     );
 
@@ -934,11 +934,9 @@ export const pickDerbySlot = async (
       { draft_id: draftId, action: "slot_picked", slot_number: slotNumber }
     );
 
-    return res.status(200).json({
-      message: "Slot picked successfully",
-      slot_number: slotNumber,
-      derby_status: settings.derby_status,
-    });
+    // Return the updated draft object
+    const updatedDraft = mapDraftRow(updateResult.rows[0]);
+    return res.status(200).json(updatedDraft);
   } catch (error) {
     next(error);
   }
@@ -1076,13 +1074,15 @@ export const resumeDerby = async (
 
     // Resume the derby
     settings.derby_status = "in_progress";
+    // Use derby_timer_seconds (default to 300 seconds if not set)
+    const derbyTimerSeconds = settings.derby_timer_seconds || 300;
     settings.pick_deadline = new Date(
-      Date.now() + draft.pick_time_seconds * 1000
+      Date.now() + derbyTimerSeconds * 1000
     ).toISOString();
 
     const result = await pool.query<DraftRow>(
-      `UPDATE drafts SET settings = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING *`,
-      [JSON.stringify(settings), draftId]
+      `UPDATE drafts SET settings = $1, pick_deadline = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3 RETURNING *`,
+      [JSON.stringify(settings), settings.pick_deadline, draftId]
     );
 
     // Get username for system message
@@ -1105,6 +1105,229 @@ export const resumeDerby = async (
     const updatedDraft = mapDraftRow(row);
 
     return res.status(200).json(updatedDraft);
+  } catch (error) {
+    next(error);
+  }
+};
+// ==========================
+// DRAFT ROOM (Player Picks)
+// ==========================
+
+import { Container } from '../../infrastructure/di/Container';
+
+/**
+ * POST /api/leagues/:leagueId/drafts/:draftId/start
+ * Start a draft (commissioner only)
+ */
+export const startDraft = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const leagueId = parseInt(req.params.leagueId, 10);
+    const draftId = parseInt(req.params.draftId, 10);
+    const userId = req.user?.userId;
+
+    if (isNaN(leagueId) || isNaN(draftId) || !userId) {
+      throw new ValidationError("Invalid parameters");
+    }
+
+    const draftService = Container.getInstance().getDraftService();
+    const draft = await draftService.startDraft(draftId, userId);
+
+    return res.status(200).json(draft);
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * POST /api/leagues/:leagueId/drafts/:draftId/pause
+ * Pause a draft (commissioner only)
+ */
+export const pauseDraftRoom = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const leagueId = parseInt(req.params.leagueId, 10);
+    const draftId = parseInt(req.params.draftId, 10);
+    const userId = req.user?.userId;
+
+    if (isNaN(leagueId) || isNaN(draftId) || !userId) {
+      throw new ValidationError("Invalid parameters");
+    }
+
+    const draftService = Container.getInstance().getDraftService();
+    const draft = await draftService.pauseDraft(draftId, userId);
+
+    return res.status(200).json(draft);
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * POST /api/leagues/:leagueId/drafts/:draftId/resume
+ * Resume a draft (commissioner only)
+ */
+export const resumeDraftRoom = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const leagueId = parseInt(req.params.leagueId, 10);
+    const draftId = parseInt(req.params.draftId, 10);
+    const userId = req.user?.userId;
+
+    if (isNaN(leagueId) || isNaN(draftId) || !userId) {
+      throw new ValidationError("Invalid parameters");
+    }
+
+    const draftService = Container.getInstance().getDraftService();
+    const draft = await draftService.resumeDraft(draftId, userId);
+
+    return res.status(200).json(draft);
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * POST /api/leagues/:leagueId/drafts/:draftId/pick
+ * Make a player pick
+ */
+export const makePick = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const leagueId = parseInt(req.params.leagueId, 10);
+    const draftId = parseInt(req.params.draftId, 10);
+    const userId = req.user?.userId;
+    const { player_id } = req.body;
+
+    if (isNaN(leagueId) || isNaN(draftId) || !userId || !player_id) {
+      throw new ValidationError("Invalid parameters");
+    }
+
+    const draftService = Container.getInstance().getDraftService();
+    const pick = await draftService.makePick(draftId, userId, parseInt(player_id));
+
+    return res.status(201).json(pick);
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * GET /api/leagues/:leagueId/drafts/:draftId/picks
+ * Get all picks for a draft
+ */
+export const getDraftPicks = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const leagueId = parseInt(req.params.leagueId, 10);
+    const draftId = parseInt(req.params.draftId, 10);
+    const userId = req.user?.userId;
+
+    if (isNaN(leagueId) || isNaN(draftId) || !userId) {
+      throw new ValidationError("Invalid parameters");
+    }
+
+    // Check if user has access to league
+    if (!(await hasLeagueAccess(leagueId, userId))) {
+      throw new ForbiddenError("You don't have access to this league");
+    }
+
+    const draftService = Container.getInstance().getDraftService();
+    const picks = await draftService.getDraftPicks(draftId);
+
+    return res.status(200).json(picks);
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * GET /api/leagues/:leagueId/drafts/:draftId/available-players
+ * Get available players with optional filters
+ */
+export const getAvailablePlayers = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const leagueId = parseInt(req.params.leagueId, 10);
+    const draftId = parseInt(req.params.draftId, 10);
+    const userId = req.user?.userId;
+
+    if (isNaN(leagueId) || isNaN(draftId) || !userId) {
+      throw new ValidationError("Invalid parameters");
+    }
+
+    // Check if user has access to league
+    if (!(await hasLeagueAccess(leagueId, userId))) {
+      throw new ForbiddenError("You don't have access to this league");
+    }
+
+    const { position, team, search } = req.query;
+    const filters: any = {};
+
+    if (position && typeof position === 'string') {
+      filters.position = position;
+    }
+    if (team && typeof team === 'string') {
+      filters.team = team;
+    }
+    if (search && typeof search === 'string') {
+      filters.search = search;
+    }
+
+    const draftService = Container.getInstance().getDraftService();
+    const players = await draftService.getAvailablePlayers(draftId, filters);
+
+    return res.status(200).json(players);
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * GET /api/leagues/:leagueId/drafts/:draftId/state
+ * Get current draft state (draft, order, picks, current picker)
+ */
+export const getDraftState = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const leagueId = parseInt(req.params.leagueId, 10);
+    const draftId = parseInt(req.params.draftId, 10);
+    const userId = req.user?.userId;
+
+    if (isNaN(leagueId) || isNaN(draftId) || !userId) {
+      throw new ValidationError("Invalid parameters");
+    }
+
+    // Check if user has access to league
+    if (!(await hasLeagueAccess(leagueId, userId))) {
+      throw new ForbiddenError("You don't have access to this league");
+    }
+
+    const draftService = Container.getInstance().getDraftService();
+    const state = await draftService.getDraftState(draftId);
+
+    return res.status(200).json(state);
   } catch (error) {
     next(error);
   }

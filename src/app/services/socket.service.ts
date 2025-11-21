@@ -358,6 +358,19 @@ export class SocketService {
   }
 
   /**
+   * Generic method to emit events to a specific room
+   */
+  public emitToRoom(roomName: string, eventName: string, data: any) {
+    console.log(`[SocketService] Emitting ${eventName} to room: ${roomName}`);
+    const sockets = this.io.sockets.adapter.rooms.get(roomName);
+    console.log(
+      `[SocketService] Number of clients in room ${roomName}:`,
+      sockets ? sockets.size : 0
+    );
+    this.io.to(roomName).emit(eventName, data);
+  }
+
+  /**
    * Get the Socket.IO server instance
    */
   public getIO(): Server {
