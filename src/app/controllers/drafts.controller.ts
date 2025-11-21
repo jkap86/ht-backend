@@ -252,21 +252,6 @@ export const updateDraft = async (
       throw new ValidationError("User ID not found in request");
     }
 
-    // Check if user is commissioner
-    if (!(await isCommissioner(leagueId, userId))) {
-      throw new ForbiddenError("Only the commissioner can update drafts");
-    }
-
-    // Check if draft exists and belongs to this league and get existing settings
-    const checkResult = await pool.query<DraftRow>(
-      "SELECT settings FROM drafts WHERE id = $1 AND league_id = $2",
-      [draftId, leagueId]
-    );
-
-    if (checkResult.rows.length === 0) {
-      throw new NotFoundError("Draft not found");
-    }
-
     const {
       draft_type,
       third_round_reversal,
@@ -281,71 +266,20 @@ export const updateDraft = async (
       derby_on_timeout,
     } = req.body;
 
-    // Merge with existing settings to preserve fields like derby_status, current_picker_index, etc.
-    const existingSettings = checkResult.rows[0].settings || {};
-    const settings: any = {
-      ...existingSettings,
-      player_pool:
-        player_pool !== undefined
-          ? player_pool
-          : existingSettings.player_pool || "all",
-      draft_order:
-        draft_order !== undefined
-          ? draft_order
-          : existingSettings.draft_order || "randomize",
-      timer_mode:
-        timer_mode !== undefined
-          ? timer_mode
-          : existingSettings.timer_mode || "per_pick",
-    };
-
-    // Add derby-specific fields if provided
-    if (derby_start_time) {
-      settings.derby_start_time = derby_start_time;
-    }
-    if (auto_start_derby !== undefined) {
-      settings.auto_start_derby = auto_start_derby;
-    }
-    if (derby_timer_seconds !== undefined) {
-      settings.derby_timer_seconds = derby_timer_seconds;
-
-      // If derby is in progress and timer was updated, recalculate pick_deadline
-      if (settings.derby_status === 'in_progress' && settings.pick_deadline) {
-        const now = new Date();
-        settings.pick_deadline = new Date(now.getTime() + derby_timer_seconds * 1000);
-      }
-    }
-    if (derby_on_timeout !== undefined) {
-      settings.derby_on_timeout = derby_on_timeout;
-    }
-
-    const result = await pool.query<DraftRow>(
-      `UPDATE drafts SET
-        draft_type = COALESCE($1, draft_type),
-        third_round_reversal = COALESCE($2, third_round_reversal),
-        rounds = COALESCE($3, rounds),
-        pick_time_seconds = COALESCE($4, pick_time_seconds),
-        settings = COALESCE($5, settings),
-        pick_deadline = $8,
-        updated_at = CURRENT_TIMESTAMP
-      WHERE id = $6 AND league_id = $7
-      RETURNING *`,
-      [
-        draft_type,
-        third_round_reversal,
-        rounds,
-        pick_time_seconds,
-        JSON.stringify(settings),
-        draftId,
-        leagueId,
-        settings.pick_deadline || null,
-      ]
-    );
-
-    // Transform snake_case to camelCase for frontend
-    const row = result.rows[0];
-
-    const draft = mapDraftRow(row);
+    const draftService = Container.getInstance().getDraftService();
+    const draft = await draftService.updateDraft(leagueId, draftId, userId, {
+      draftType: draft_type,
+      thirdRoundReversal: third_round_reversal,
+      rounds,
+      pickTimeSeconds: pick_time_seconds,
+      playerPool: player_pool,
+      draftOrder: draft_order,
+      timerMode: timer_mode,
+      derbyStartTime: derby_start_time,
+      autoStartDerby: auto_start_derby,
+      derbyTimerSeconds: derby_timer_seconds,
+      derbyOnTimeout: derby_on_timeout,
+    });
 
     return res.status(200).json(draft);
   } catch (error) {
@@ -468,82 +402,9 @@ export const startDerby = async (
       throw new ValidationError("User ID not found in request");
     }
 
-    // Check if user is commissioner
-    if (!(await isCommissioner(leagueId, userId))) {
-      throw new ForbiddenError("Only the commissioner can start the derby");
-    }
+    const draftService = Container.getInstance().getDraftService();
+    const updatedDraft = await draftService.startDerby(leagueId, draftId, userId);
 
-    // Check if draft exists and is a derby draft
-    const draftResult = await pool.query(
-      "SELECT id, draft_type, settings FROM drafts WHERE id = $1 AND league_id = $2",
-      [draftId, leagueId]
-    );
-
-    if (draftResult.rows.length === 0) {
-      throw new NotFoundError("Draft not found");
-    }
-
-    const draft = draftResult.rows[0];
-    const settings = draft.settings || {};
-
-    if (settings.draft_order !== "derby") {
-      throw new ValidationError(
-        "This endpoint is only for derby drafts (draft_order must be 'derby')"
-      );
-    }
-
-    // Check if draft order has been randomized
-    const orderCheck = await pool.query(
-      "SELECT COUNT(*) as count FROM draft_order WHERE draft_id = $1",
-      [draftId]
-    );
-
-    if (parseInt(orderCheck.rows[0].count) === 0) {
-      throw new ValidationError(
-        "Derby order must be randomized before starting"
-      );
-    }
-
-    // Use derby timer seconds from settings (not pick_time_seconds)
-    const derbyTimerSeconds = settings.derby_timer_seconds || 300; // Default 5 minutes
-
-    // Set derby start time to now
-    const derbyStartTime = new Date();
-    settings.derby_start_time = derbyStartTime.toISOString();
-    settings.derby_status = "in_progress";
-    settings.current_picker_index = 0; // First person in derby order picks first
-    settings.pick_deadline = new Date(
-      Date.now() + derbyTimerSeconds * 1000
-    ).toISOString();
-
-    // Update the draft with derby start time and status
-    const updateResult = await pool.query<DraftRow>(
-      `UPDATE drafts
-       SET settings = $1,
-           updated_at = CURRENT_TIMESTAMP,
-           pick_deadline = $2
-       WHERE id = $3
-       RETURNING *`,
-      [JSON.stringify(settings), settings.pick_deadline, draftId]
-    );
-
-    // Get username for system message
-    const userResult = await pool.query(
-      "SELECT username FROM users WHERE id = $1",
-      [userId]
-    );
-
-    const username = userResult.rows[0]?.username || "Commissioner";
-
-    // Send system message
-    await getChatService().sendSystemMessage(
-      leagueId,
-      `${username} started the derby! Users can now select their draft positions.`,
-      { draft_id: draftId, action: "derby_started" }
-    );
-
-    // Return the updated draft object
-    const updatedDraft = mapDraftRow(updateResult.rows[0]);
     return res.status(200).json(updatedDraft);
   } catch (error) {
     next(error);

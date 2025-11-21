@@ -462,6 +462,18 @@ export class DraftService {
   }
 
   /**
+   * Get username by user ID
+   */
+  private async getUsernameById(userId: string): Promise<string> {
+    const result = await this.pool.query(
+      'SELECT username FROM users WHERE id = $1',
+      [userId]
+    );
+
+    return result.rows[0]?.username || 'Commissioner';
+  }
+
+  /**
    * Map database row to DraftData (transforms snake_case to camelCase)
    */
   private mapDraftRow(row: any): DraftData {
@@ -616,6 +628,104 @@ export class DraftService {
   }
 
   /**
+   * Update a draft
+   */
+  async updateDraft(
+    leagueId: number,
+    draftId: number,
+    userId: string,
+    params: {
+      draftType?: string;
+      thirdRoundReversal?: boolean;
+      rounds?: number;
+      pickTimeSeconds?: number;
+      playerPool?: string;
+      draftOrder?: string;
+      timerMode?: string;
+      derbyStartTime?: string;
+      autoStartDerby?: boolean;
+      derbyTimerSeconds?: number;
+      derbyOnTimeout?: string;
+    }
+  ): Promise<DraftData> {
+    // Verify commissioner
+    await this.verifyCommissioner(leagueId, userId);
+
+    // Get existing draft and settings
+    const checkResult = await this.pool.query(
+      'SELECT settings FROM drafts WHERE id = $1 AND league_id = $2',
+      [draftId, leagueId]
+    );
+
+    if (checkResult.rows.length === 0) {
+      throw new NotFoundException('Draft not found');
+    }
+
+    // Merge with existing settings to preserve fields like derby_status, current_picker_index, etc.
+    const existingSettings = checkResult.rows[0].settings || {};
+    const settings: any = {
+      ...existingSettings,
+      player_pool:
+        params.playerPool !== undefined
+          ? params.playerPool
+          : existingSettings.player_pool || 'all',
+      draft_order:
+        params.draftOrder !== undefined
+          ? params.draftOrder
+          : existingSettings.draft_order || 'randomize',
+      timer_mode:
+        params.timerMode !== undefined
+          ? params.timerMode
+          : existingSettings.timer_mode || 'per_pick',
+    };
+
+    // Add derby-specific fields if provided
+    if (params.derbyStartTime !== undefined) {
+      settings.derby_start_time = params.derbyStartTime;
+    }
+    if (params.autoStartDerby !== undefined) {
+      settings.auto_start_derby = params.autoStartDerby;
+    }
+    if (params.derbyTimerSeconds !== undefined) {
+      settings.derby_timer_seconds = params.derbyTimerSeconds;
+
+      // If derby is in progress and timer was updated, recalculate pick_deadline
+      if (settings.derby_status === 'in_progress' && settings.pick_deadline) {
+        const now = new Date();
+        settings.pick_deadline = new Date(now.getTime() + params.derbyTimerSeconds * 1000);
+      }
+    }
+    if (params.derbyOnTimeout !== undefined) {
+      settings.derby_on_timeout = params.derbyOnTimeout;
+    }
+
+    const result = await this.pool.query(
+      `UPDATE drafts SET
+        draft_type = COALESCE($1, draft_type),
+        third_round_reversal = COALESCE($2, third_round_reversal),
+        rounds = COALESCE($3, rounds),
+        pick_time_seconds = COALESCE($4, pick_time_seconds),
+        settings = COALESCE($5, settings),
+        pick_deadline = $8,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = $6 AND league_id = $7
+      RETURNING *`,
+      [
+        params.draftType,
+        params.thirdRoundReversal,
+        params.rounds,
+        params.pickTimeSeconds,
+        JSON.stringify(settings),
+        draftId,
+        leagueId,
+        settings.pick_deadline || null,
+      ]
+    );
+
+    return this.mapDraftRow(result.rows[0]);
+  }
+
+  /**
    * Get draft order for a draft
    */
   async getDraftOrderForDraft(leagueId: number, draftId: number, userId: string): Promise<DraftOrderEntry[]> {
@@ -626,6 +736,75 @@ export class DraftService {
     }
 
     return this.draftRepository.getDraftOrder(draftId);
+  }
+
+  /**
+   * Start a derby draft
+   */
+  async startDerby(leagueId: number, draftId: number, userId: string): Promise<DraftData> {
+    // Verify commissioner
+    await this.verifyCommissioner(leagueId, userId);
+
+    // Check if draft exists and is a derby draft
+    const draftResult = await this.pool.query(
+      'SELECT id, draft_type, settings FROM drafts WHERE id = $1 AND league_id = $2',
+      [draftId, leagueId]
+    );
+
+    if (draftResult.rows.length === 0) {
+      throw new NotFoundException('Draft not found');
+    }
+
+    const draft = draftResult.rows[0];
+    const settings = draft.settings || {};
+
+    if (settings.draft_order !== 'derby') {
+      throw new ValidationException(
+        "This endpoint is only for derby drafts (draft_order must be 'derby')"
+      );
+    }
+
+    // Check if draft order has been randomized
+    const orderCheck = await this.pool.query(
+      'SELECT COUNT(*) as count FROM draft_order WHERE draft_id = $1',
+      [draftId]
+    );
+
+    if (parseInt(orderCheck.rows[0].count) === 0) {
+      throw new ValidationException('Derby order must be randomized before starting');
+    }
+
+    // Use derby timer seconds from settings (not pick_time_seconds)
+    const derbyTimerSeconds = settings.derby_timer_seconds || 300; // Default 5 minutes
+
+    // Set derby start time to now
+    const derbyStartTime = new Date();
+    settings.derby_start_time = derbyStartTime.toISOString();
+    settings.derby_status = 'in_progress';
+    settings.current_picker_index = 0; // First person in derby order picks first
+    settings.pick_deadline = new Date(Date.now() + derbyTimerSeconds * 1000).toISOString();
+
+    // Update the draft with derby start time and status
+    const updateResult = await this.pool.query(
+      `UPDATE drafts
+       SET settings = $1,
+           updated_at = CURRENT_TIMESTAMP,
+           pick_deadline = $2
+       WHERE id = $3
+       RETURNING *`,
+      [JSON.stringify(settings), settings.pick_deadline, draftId]
+    );
+
+    // Get username for system message
+    const username = await this.getUsernameById(userId);
+
+    // Send system message
+    await this.sendSystemMessage(
+      leagueId,
+      `${username} started the derby! Users can now select their draft positions.`
+    );
+
+    return this.mapDraftRow(updateResult.rows[0]);
   }
 
   /**
