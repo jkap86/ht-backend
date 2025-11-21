@@ -460,4 +460,171 @@ export class DraftService {
     if (result.rows.length === 0) return null;
     return Player.fromDatabase(result.rows[0]);
   }
+
+  /**
+   * Map database row to DraftData (transforms snake_case to camelCase)
+   */
+  private mapDraftRow(row: any): DraftData {
+    const settings: any = row.settings || {};
+    const settingsPickDeadline = settings.pick_deadline as string | undefined;
+
+    // Prefer the JSON settings pick_deadline (used by derby), fall back to column
+    const pickDeadline: Date | null = settingsPickDeadline
+      ? new Date(settingsPickDeadline)
+      : row.pick_deadline;
+
+    return {
+      id: row.id,
+      leagueId: row.league_id,
+      draftType: row.draft_type,
+      thirdRoundReversal: row.third_round_reversal,
+      status: row.status,
+      currentPick: row.current_pick,
+      currentRound: row.current_round,
+      currentRosterId: row.current_roster_id,
+      pickTimeSeconds: row.pick_time_seconds,
+      pickDeadline,
+      rounds: row.rounds,
+      startedAt: row.started_at,
+      completedAt: row.completed_at,
+      settings: row.settings,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  }
+
+  // ==========================================
+  // Draft CRUD Operations
+  // ==========================================
+
+  /**
+   * Get all drafts for a league
+   */
+  async getLeagueDrafts(leagueId: number, userId: string): Promise<DraftData[]> {
+    // Verify access
+    const hasAccess = await this.userHasLeagueAccess(leagueId, userId);
+    if (!hasAccess) {
+      throw new NotFoundException('League not found or access denied');
+    }
+
+    const result = await this.pool.query(
+      `SELECT * FROM drafts
+       WHERE league_id = $1
+       ORDER BY created_at DESC`,
+      [leagueId]
+    );
+
+    return result.rows.map(row => this.mapDraftRow(row));
+  }
+
+  /**
+   * Get a specific draft by ID
+   */
+  async getDraftById(leagueId: number, draftId: number, userId: string): Promise<DraftData> {
+    // Verify access
+    const hasAccess = await this.userHasLeagueAccess(leagueId, userId);
+    if (!hasAccess) {
+      throw new NotFoundException('League not found or access denied');
+    }
+
+    const result = await this.pool.query(
+      'SELECT * FROM drafts WHERE id = $1 AND league_id = $2',
+      [draftId, leagueId]
+    );
+
+    if (result.rows.length === 0) {
+      throw new NotFoundException('Draft not found');
+    }
+
+    return this.mapDraftRow(result.rows[0]);
+  }
+
+  /**
+   * Create a new draft
+   */
+  async createDraft(
+    leagueId: number,
+    userId: string,
+    params: {
+      draftType: string;
+      thirdRoundReversal?: boolean;
+      rounds: number;
+      pickTimeSeconds: number;
+      playerPool?: string;
+      draftOrder?: string;
+      timerMode?: string;
+      derbyStartTime?: string;
+      autoStartDerby?: boolean;
+      derbyTimerSeconds?: number;
+      derbyOnTimeout?: string;
+    }
+  ): Promise<DraftData> {
+    // Verify commissioner
+    await this.verifyCommissioner(leagueId, userId);
+
+    // Build settings object
+    const settings: any = {
+      player_pool: params.playerPool || 'all',
+      draft_order: params.draftOrder || 'randomize',
+      timer_mode: params.timerMode || 'per_pick',
+    };
+
+    // Add derby-specific fields if provided
+    if (params.derbyStartTime) settings.derby_start_time = params.derbyStartTime;
+    if (params.autoStartDerby !== undefined) settings.auto_start_derby = params.autoStartDerby;
+    if (params.derbyTimerSeconds !== undefined) settings.derby_timer_seconds = params.derbyTimerSeconds;
+    if (params.derbyOnTimeout !== undefined) settings.derby_on_timeout = params.derbyOnTimeout;
+
+    const result = await this.pool.query(
+      `INSERT INTO drafts (
+        league_id, draft_type, third_round_reversal, rounds,
+        pick_time_seconds, settings, status, current_roster_id
+      ) VALUES ($1, $2, $3, $4, $5, $6, 'not_started', NULL)
+      RETURNING *`,
+      [
+        leagueId,
+        params.draftType,
+        params.thirdRoundReversal || false,
+        params.rounds,
+        params.pickTimeSeconds,
+        JSON.stringify(settings),
+      ]
+    );
+
+    return this.mapDraftRow(result.rows[0]);
+  }
+
+  /**
+   * Delete a draft
+   */
+  async deleteDraft(leagueId: number, draftId: number, userId: string): Promise<void> {
+    // Verify commissioner
+    await this.verifyCommissioner(leagueId, userId);
+
+    // Check if draft exists
+    const checkResult = await this.pool.query(
+      'SELECT id FROM drafts WHERE id = $1 AND league_id = $2',
+      [draftId, leagueId]
+    );
+
+    if (checkResult.rows.length === 0) {
+      throw new NotFoundException('Draft not found');
+    }
+
+    // Delete the draft (cascade will handle related records)
+    await this.pool.query('DELETE FROM drafts WHERE id = $1', [draftId]);
+  }
+
+  /**
+   * Get draft order for a draft
+   */
+  async getDraftOrderForDraft(leagueId: number, draftId: number, userId: string): Promise<DraftOrderEntry[]> {
+    // Verify access
+    const hasAccess = await this.userHasLeagueAccess(leagueId, userId);
+    if (!hasAccess) {
+      throw new NotFoundException('League not found or access denied');
+    }
+
+    return this.draftRepository.getDraftOrder(draftId);
+  }
 }

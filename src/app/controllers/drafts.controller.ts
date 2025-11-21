@@ -127,20 +127,8 @@ export const getLeagueDrafts = async (
       throw new ValidationError("User ID not found in request");
     }
 
-    // Check if user has access to this league
-    if (!(await hasLeagueAccess(leagueId, userId))) {
-      throw new NotFoundError("League not found or access denied");
-    }
-
-    const result = await pool.query<DraftRow>(
-      `SELECT * FROM drafts
-       WHERE league_id = $1
-       ORDER BY created_at DESC`,
-      [leagueId]
-    );
-
-    // Transform snake_case to camelCase for frontend
-    const drafts = result.rows.map((row) => mapDraftRow(row));
+    const draftService = Container.getInstance().getDraftService();
+    const drafts = await draftService.getLeagueDrafts(leagueId, userId);
 
     return res.status(200).json(drafts);
   } catch (error) {
@@ -170,24 +158,8 @@ export const getDraft = async (
       throw new ValidationError("User ID not found in request");
     }
 
-    // Check if user has access to this league
-    if (!(await hasLeagueAccess(leagueId, userId))) {
-      throw new NotFoundError("League not found or access denied");
-    }
-
-    const result = await pool.query<DraftRow>(
-      "SELECT * FROM drafts WHERE id = $1 AND league_id = $2",
-      [draftId, leagueId]
-    );
-
-    if (result.rows.length === 0) {
-      throw new NotFoundError("Draft not found");
-    }
-
-    // Transform snake_case to camelCase for frontend
-    const row = result.rows[0];
-
-    const draft = mapDraftRow(row);
+    const draftService = Container.getInstance().getDraftService();
+    const draft = await draftService.getDraftById(leagueId, draftId, userId);
 
     return res.status(200).json(draft);
   } catch (error) {
@@ -216,11 +188,6 @@ export const createDraft = async (
       throw new ValidationError("User ID not found in request");
     }
 
-    // Check if user is commissioner
-    if (!(await isCommissioner(leagueId, userId))) {
-      throw new ForbiddenError("Only the commissioner can create drafts");
-    }
-
     const {
       draft_type,
       third_round_reversal,
@@ -242,47 +209,20 @@ export const createDraft = async (
       );
     }
 
-    // Build settings object
-    const settings: any = {
-      player_pool: player_pool || "all",
-      draft_order: draft_order || "randomize",
-      timer_mode: timer_mode || "per_pick",
-    };
-
-    // Add derby-specific fields if provided
-    if (derby_start_time) {
-      settings.derby_start_time = derby_start_time;
-    }
-    if (auto_start_derby !== undefined) {
-      settings.auto_start_derby = auto_start_derby;
-    }
-    if (derby_timer_seconds !== undefined) {
-      settings.derby_timer_seconds = derby_timer_seconds;
-    }
-    if (derby_on_timeout !== undefined) {
-      settings.derby_on_timeout = derby_on_timeout;
-    }
-
-    const result = await pool.query<DraftRow>(
-      `INSERT INTO drafts (
-        league_id, draft_type, third_round_reversal, rounds,
-        pick_time_seconds, settings, status, current_roster_id
-      ) VALUES ($1, $2, $3, $4, $5, $6, 'not_started', NULL)
-      RETURNING *`,
-      [
-        leagueId,
-        draft_type,
-        third_round_reversal || false,
-        rounds,
-        pick_time_seconds,
-        JSON.stringify(settings),
-      ]
-    );
-
-    // Transform snake_case to camelCase for frontend
-    const row = result.rows[0];
-
-    const draft = mapDraftRow(row);
+    const draftService = Container.getInstance().getDraftService();
+    const draft = await draftService.createDraft(leagueId, userId, {
+      draftType: draft_type,
+      thirdRoundReversal: third_round_reversal,
+      rounds,
+      pickTimeSeconds: pick_time_seconds,
+      playerPool: player_pool,
+      draftOrder: draft_order,
+      timerMode: timer_mode,
+      derbyStartTime: derby_start_time,
+      autoStartDerby: auto_start_derby,
+      derbyTimerSeconds: derby_timer_seconds,
+      derbyOnTimeout: derby_on_timeout,
+    });
 
     return res.status(201).json(draft);
   } catch (error) {
@@ -435,19 +375,8 @@ export const deleteDraft = async (
       throw new ValidationError("User ID not found in request");
     }
 
-    // Check if user is commissioner
-    if (!(await isCommissioner(leagueId, userId))) {
-      throw new ForbiddenError("Only the commissioner can delete drafts");
-    }
-
-    const result = await pool.query(
-      "DELETE FROM drafts WHERE id = $1 AND league_id = $2 RETURNING id",
-      [draftId, leagueId]
-    );
-
-    if (result.rows.length === 0) {
-      throw new NotFoundError("Draft not found");
-    }
+    const draftService = Container.getInstance().getDraftService();
+    await draftService.deleteDraft(leagueId, draftId, userId);
 
     return res.status(200).json({ message: "Draft deleted successfully" });
   } catch (error) {
@@ -477,54 +406,8 @@ export const getDraftOrder = async (
       throw new ValidationError("User ID not found in request");
     }
 
-    // Check if user has access to this league
-    if (!(await hasLeagueAccess(leagueId, userId))) {
-      throw new NotFoundError("League not found or access denied");
-    }
-
-    // Check if draft exists and belongs to this league, get settings to check if it's a derby
-    const draftResult = await pool.query(
-      "SELECT id, settings FROM drafts WHERE id = $1 AND league_id = $2",
-      [draftId, leagueId]
-    );
-
-    if (draftResult.rows.length === 0) {
-      throw new NotFoundError("Draft not found");
-    }
-
-    const settings = draftResult.rows[0].settings || {};
-    const isDerby = settings.draft_order === "derby";
-
-    // Fetch the draft order with roster details
-    // For derby drafts, order by id to preserve picking order
-    // For regular drafts, order by draft_position
-    const orderResult = await pool.query(
-      `SELECT
-        d_order.id,
-        d_order.draft_id,
-        d_order.roster_id,
-        d_order.draft_position,
-        r.roster_id as roster_number,
-        r.user_id,
-        COALESCE(u.username, 'Team ' || r.roster_id) as username
-       FROM draft_order d_order
-       INNER JOIN rosters r ON r.id = d_order.roster_id
-       LEFT JOIN users u ON u.id = r.user_id
-       WHERE d_order.draft_id = $1
-       ORDER BY ${isDerby ? "d_order.id" : "d_order.draft_position"}`,
-      [draftId]
-    );
-
-    // Transform snake_case to camelCase for frontend
-    const draftOrder = orderResult.rows.map((row) => ({
-      id: row.id,
-      draftId: row.draft_id,
-      rosterId: row.roster_id,
-      draftPosition: row.draft_position,
-      rosterNumber: row.roster_number,
-      userId: row.user_id,
-      username: row.username,
-    }));
+    const draftService = Container.getInstance().getDraftService();
+    const draftOrder = await draftService.getDraftOrderForDraft(leagueId, draftId, userId);
 
     return res.status(200).json(draftOrder);
   } catch (error) {
