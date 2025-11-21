@@ -1,6 +1,6 @@
 import { Pool } from 'pg';
 import { Player } from '../../domain/models/Player';
-import { IPlayerRepository, UpsertPlayerData } from '../../domain/repositories/IPlayerRepository';
+import { IPlayerRepository, UpsertPlayerData, PlayerFilters } from '../../domain/repositories/IPlayerRepository';
 
 export class PlayerRepository implements IPlayerRepository {
   constructor(private readonly db: Pool) {}
@@ -104,6 +104,16 @@ export class PlayerRepository implements IPlayerRepository {
     }
   }
 
+  async findById(id: number): Promise<Player | null> {
+    const result = await this.db.query(
+      'SELECT * FROM players WHERE id = $1',
+      [id]
+    );
+
+    if (result.rows.length === 0) return null;
+    return Player.fromDatabase(result.rows[0]);
+  }
+
   async findBySleeperId(sleeperId: string): Promise<Player | null> {
     const result = await this.db.query(
       'SELECT * FROM players WHERE sleeper_id = $1',
@@ -112,6 +122,60 @@ export class PlayerRepository implements IPlayerRepository {
 
     if (result.rows.length === 0) return null;
     return Player.fromDatabase(result.rows[0]);
+  }
+
+  async search(filters: PlayerFilters): Promise<Player[]> {
+    const conditions: string[] = [];
+    const params: any[] = [];
+    let paramIndex = 1;
+
+    // Active filter (default to true if not specified)
+    if (filters.active !== undefined) {
+      conditions.push(`active = $${paramIndex++}`);
+      params.push(filters.active);
+    } else {
+      conditions.push(`active = true`);
+    }
+
+    // Position filter
+    if (filters.position) {
+      conditions.push(`position = $${paramIndex++}`);
+      params.push(filters.position);
+    }
+
+    // Team filter
+    if (filters.team) {
+      conditions.push(`team = $${paramIndex++}`);
+      params.push(filters.team);
+    }
+
+    // Search filter (name search)
+    if (filters.search) {
+      conditions.push(`(
+        full_name ILIKE $${paramIndex} OR
+        first_name ILIKE $${paramIndex} OR
+        last_name ILIKE $${paramIndex}
+      )`);
+      params.push(`%${filters.search}%`);
+      paramIndex++;
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const limitClause = filters.limit ? `LIMIT $${paramIndex++}` : '';
+    const offsetClause = filters.offset ? `OFFSET $${paramIndex++}` : '';
+
+    if (filters.limit) params.push(filters.limit);
+    if (filters.offset) params.push(filters.offset);
+
+    const query = `
+      SELECT * FROM players
+      ${whereClause}
+      ORDER BY full_name
+      ${limitClause} ${offsetClause}
+    `;
+
+    const result = await this.db.query(query, params);
+    return result.rows.map(row => Player.fromDatabase(row));
   }
 
   async markInactive(sleeperIds: string[]): Promise<number> {

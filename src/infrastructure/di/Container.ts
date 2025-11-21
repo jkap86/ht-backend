@@ -17,6 +17,7 @@ import { AuthService } from '../../application/services/AuthService';
 import { LeagueService } from '../../application/services/LeagueService';
 import { ChatService } from '../../application/services/ChatService';
 import { PlayerSyncService } from '../../application/services/PlayerSyncService';
+import { PlayerService } from '../../application/services/PlayerService';
 import { DraftService } from '../../application/services/DraftService';
 import { SocketChatEventsPublisher } from '../../app/runtime/socket/SocketChatEventsPublisher';
 import { SocketDraftEventsPublisher } from '../../app/runtime/socket/SocketDraftEventsPublisher';
@@ -47,6 +48,7 @@ export class Container {
   private _chatService?: ChatService;
   private _chatEventsPublisher?: IChatEventsPublisher;
   private _playerSyncService?: PlayerSyncService;
+  private _playerService?: PlayerService;
   private _sleeperApiClient?: SleeperApiClient;
   private _draftService?: DraftService;
   private _draftEventsPublisher?: IDraftEventsPublisher;
@@ -203,6 +205,16 @@ export class Container {
   }
 
   /**
+   * Get Player Service
+   */
+  getPlayerService(): PlayerService {
+    if (!this._playerService) {
+      this._playerService = new PlayerService(this.getPlayerRepository());
+    }
+    return this._playerService;
+  }
+
+  /**
    * Get Draft Repository
    */
   getDraftRepository(): IDraftRepository {
@@ -252,6 +264,7 @@ export class Container {
     this._chatService = undefined;
     this._chatEventsPublisher = undefined;
     this._playerSyncService = undefined;
+    this._playerService = undefined;
     this._sleeperApiClient = undefined;
     this._draftService = undefined;
     this._draftEventsPublisher = undefined;

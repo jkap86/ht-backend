@@ -29,7 +29,7 @@ export class PlayerSyncService {
 
       // Transform Sleeper API format to our format
       const playersToUpsert: UpsertPlayerData[] = sleeperPlayers
-        .filter(p => p.player_id && p.full_name) // Filter out invalid entries
+        .filter(p => p.player_id && p.full_name && p.active === true) // Only active players
         .map(p => this.transformSleeperPlayer(p));
 
       console.log(`[Player Sync] Upserting ${playersToUpsert.length} players to database...`);
@@ -63,6 +63,13 @@ export class PlayerSyncService {
    * Transform Sleeper player format to our domain format
    */
   private transformSleeperPlayer(sleeperPlayer: SleeperPlayer): UpsertPlayerData {
+    // Helper to safely parse integers
+    const safeInt = (value: any): number | null => {
+      if (value === null || value === undefined || value === '') return null;
+      const parsed = typeof value === 'number' ? value : parseInt(value, 10);
+      return isNaN(parsed) ? null : parsed;
+    };
+
     return {
       sleeperId: sleeperPlayer.player_id,
       firstName: sleeperPlayer.first_name || null,
@@ -71,14 +78,14 @@ export class PlayerSyncService {
       fantasyPositions: sleeperPlayer.fantasy_positions || [],
       position: sleeperPlayer.position || null,
       team: sleeperPlayer.team || null,
-      yearsExp: sleeperPlayer.years_exp ?? null,
-      age: sleeperPlayer.age ?? null,
+      yearsExp: safeInt(sleeperPlayer.years_exp),
+      age: safeInt(sleeperPlayer.age),
       active: sleeperPlayer.active ?? true,
       status: sleeperPlayer.status || null,
       injuryStatus: sleeperPlayer.injury_status || null,
       injuryNotes: sleeperPlayer.injury_notes || null,
-      depthChartPosition: sleeperPlayer.depth_chart_position ?? null,
-      jerseyNumber: sleeperPlayer.number ?? null,
+      depthChartPosition: safeInt(sleeperPlayer.depth_chart_position),
+      jerseyNumber: safeInt(sleeperPlayer.number),
       height: sleeperPlayer.height || null,
       weight: sleeperPlayer.weight || null,
       college: sleeperPlayer.college || null,
