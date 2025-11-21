@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import { getServiceHealth } from "../services/health.service";
+import { getServiceHealth } from "../runtime/health/health.service";
 
 export const getHealthStatus = (req: Request, res: Response) => {
   const health = getServiceHealth();

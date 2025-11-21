@@ -1,4 +1,4 @@
-import { Container } from '../../infrastructure/di/Container';
+import { Container } from '../../../infrastructure/di/Container';
 
 let lastSyncTime: Date | null = null;
 let isSyncing = false;

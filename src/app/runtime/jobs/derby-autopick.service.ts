@@ -1,7 +1,7 @@
-// src/app/services/derby-autopick.service.ts
-import { pool } from "../../db/pool";
-import { Container } from "../../infrastructure/di/Container";
-import { getSocketService } from "./socket.service";
+// src/app/runtime/jobs/derby-autopick.service.ts
+import { pool } from "../../../db/pool";
+import { Container } from "../../../infrastructure/di/Container";
+import { getSocketService } from "../socket/socket.service";
 
 /**
  * Check all active derbies and auto-pick for expired deadlines

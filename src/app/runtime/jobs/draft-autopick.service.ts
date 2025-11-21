@@ -1,5 +1,5 @@
-import { Container } from '../../infrastructure/di/Container';
-import { pool } from '../../db/pool';
+import { Container } from '../../../infrastructure/di/Container';
+import { pool } from '../../../db/pool';
 
 let isProcessing = false;
 

@@ -1,5 +1,5 @@
-// src/app/services/SocketChatEventsPublisher.ts
-import { IChatEventsPublisher } from '../../application/services/IChatEventsPublisher';
+// src/app/runtime/socket/SocketChatEventsPublisher.ts
+import { IChatEventsPublisher } from '../../../application/services/IChatEventsPublisher';
 import { getSocketService } from './socket.service';
 
 /**

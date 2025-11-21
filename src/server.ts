@@ -7,10 +7,10 @@ import cron from "node-cron";
 import { pool } from "./db/pool";
 import { Container } from "./infrastructure/di/Container";
 import { errorHandler } from "./app/middleware/error.middleware";
-import { initializeSocketService } from "./app/services/socket.service";
-import { processExpiredDerbyPicks } from "./app/services/derby-autopick.service";
-import { processExpiredDraftPicks } from "./app/services/draft-autopick.service";
-import { syncPlayersFromSleeper } from "./app/services/player-sync.service";
+import { initializeSocketService } from "./app/runtime/socket/socket.service";
+import { processExpiredDerbyPicks } from "./app/runtime/jobs/derby-autopick.service";
+import { processExpiredDraftPicks } from "./app/runtime/jobs/draft-autopick.service";
+import { syncPlayersFromSleeper } from "./app/runtime/jobs/player-sync.service";
 
 dotenv.config();
 

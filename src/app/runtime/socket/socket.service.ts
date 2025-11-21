@@ -1,8 +1,8 @@
-// src/app/services/socket.service.ts
+// src/app/runtime/socket/socket.service.ts
 import { Server as HttpServer } from "http";
 import { Server, Socket } from "socket.io";
 import jwt from "jsonwebtoken";
-import { Container } from "../../infrastructure/di/Container";
+import { Container } from "../../../infrastructure/di/Container";
 
 interface AuthenticatedSocket extends Socket {
   userId?: string;
