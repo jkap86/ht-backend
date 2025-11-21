@@ -406,15 +406,33 @@ export class DraftService {
   }
 
   /**
-   * Verify user is commissioner
+   * Check if user is commissioner of a league (public method for controllers)
    */
-  private async verifyCommissioner(leagueId: number, userId: string): Promise<void> {
+  async isUserCommissioner(leagueId: number, userId: string): Promise<boolean> {
     const result = await this.pool.query(
       `SELECT commissioner_user_id FROM league_settings WHERE league_id = $1`,
       [leagueId]
     );
+    return result.rows.length > 0 && result.rows[0].commissioner_user_id === userId;
+  }
 
-    if (result.rows.length === 0 || result.rows[0].commissioner_user_id !== userId) {
+  /**
+   * Check if user has access to a league (public method for controllers)
+   */
+  async userHasLeagueAccess(leagueId: number, userId: string): Promise<boolean> {
+    const result = await this.pool.query(
+      `SELECT 1 FROM rosters WHERE league_id = $1 AND user_id = $2`,
+      [leagueId, userId]
+    );
+    return result.rows.length > 0;
+  }
+
+  /**
+   * Verify user is commissioner (throws if not)
+   */
+  private async verifyCommissioner(leagueId: number, userId: string): Promise<void> {
+    const isCommissioner = await this.isUserCommissioner(leagueId, userId);
+    if (!isCommissioner) {
       throw new ValidationException('Only the commissioner can perform this action');
     }
   }

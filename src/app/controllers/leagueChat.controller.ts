@@ -102,17 +102,3 @@ export const sendChatMessage = async (
   }
 };
 
-/**
- * Helper function to send a system message to league chat
- * This is used internally for automated messages (league created, user joined, settings changed, etc.)
- *
- * @deprecated Use ChatService.sendSystemMessage() instead
- */
-export const sendSystemMessage = async (
-  leagueId: number,
-  message: string,
-  metadata: Record<string, any> = {}
-): Promise<void> => {
-  const chatService = getChatService();
-  return chatService.sendSystemMessage(leagueId, message, metadata);
-};

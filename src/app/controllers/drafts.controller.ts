@@ -7,7 +7,13 @@ import {
   ValidationError,
   ForbiddenError,
 } from "../utils/errors";
-import { sendSystemMessage } from "./leagueChat.controller";
+import { Container } from "../../infrastructure/di/Container";
+import { ChatService } from "../../application/services/ChatService";
+
+// Helper to get ChatService from DI Container
+function getChatService(): ChatService {
+  return Container.getInstance().getChatService();
+}
 
 interface DraftRow {
   id: number;
@@ -669,7 +675,7 @@ export const randomizeDraftOrder = async (
       .map((item, index) => `${index + 1}. ${item.username}`)
       .join("\n");
 
-    await sendSystemMessage(
+    await getChatService().sendSystemMessage(
       leagueId,
       `Draft order has been randomized!\n\n${orderSummary}`,
       { draft_id: draftId, action: "draft_order_randomized" }
@@ -782,7 +788,7 @@ export const startDerby = async (
     const username = userResult.rows[0]?.username || "Commissioner";
 
     // Send system message
-    await sendSystemMessage(
+    await getChatService().sendSystemMessage(
       leagueId,
       `${username} started the derby! Users can now select their draft positions.`,
       { draft_id: draftId, action: "derby_started" }
@@ -928,7 +934,7 @@ export const pickDerbySlot = async (
     const username = userResult.rows[0]?.username || "User";
 
     // Send system message
-    await sendSystemMessage(
+    await getChatService().sendSystemMessage(
       leagueId,
       `${username} selected slot ${slotNumber}`,
       { draft_id: draftId, action: "slot_picked", slot_number: slotNumber }
@@ -1008,7 +1014,7 @@ export const pauseDerby = async (
     const username = userResult.rows[0]?.username || "Commissioner";
 
     // Send system message
-    await sendSystemMessage(leagueId, `${username} paused the derby`, {
+    await getChatService().sendSystemMessage(leagueId, `${username} paused the derby`, {
       draft_id: draftId,
       action: "derby_paused",
     });
@@ -1094,7 +1100,7 @@ export const resumeDerby = async (
     const username = userResult.rows[0]?.username || "Commissioner";
 
     // Send system message
-    await sendSystemMessage(leagueId, `${username} resumed the derby`, {
+    await getChatService().sendSystemMessage(leagueId, `${username} resumed the derby`, {
       draft_id: draftId,
       action: "derby_resumed",
     });
@@ -1112,8 +1118,6 @@ export const resumeDerby = async (
 // ==========================
 // DRAFT ROOM (Player Picks)
 // ==========================
-
-import { Container } from '../../infrastructure/di/Container';
 
 /**
  * POST /api/leagues/:leagueId/drafts/:draftId/start

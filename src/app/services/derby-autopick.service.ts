@@ -1,6 +1,6 @@
 // src/app/services/derby-autopick.service.ts
 import { pool } from "../../db/pool";
-import { sendSystemMessage } from "../controllers/leagueChat.controller";
+import { Container } from "../../infrastructure/di/Container";
 import { getSocketService } from "./socket.service";
 
 /**
@@ -157,7 +157,7 @@ async function autoPickSlot(
     metadata.slot_number = slotNumber;
   }
 
-  await sendSystemMessage(
+  await Container.getInstance().getChatService().sendSystemMessage(
     leagueId,
     systemMessage,
     metadata

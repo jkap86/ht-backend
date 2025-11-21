@@ -1,23 +1,14 @@
 // src/app/controllers/leagues.controller.ts
 import { Response, NextFunction } from 'express';
-import { pool } from '../../db/pool';
 import { AuthRequest } from '../middleware/auth.middleware';
 import { ValidationError } from '../utils/errors';
+import { Container } from '../../infrastructure/di/Container';
 import { LeagueService } from '../../application/services/LeagueService';
-import { LeagueRepository } from '../../infrastructure/repositories/LeagueRepository';
-import { RosterRepository } from '../../infrastructure/repositories/RosterRepository';
-import { ChatService } from '../../application/services/ChatService';
 
-// Initialize service with dependencies
-const leagueRepo = new LeagueRepository(pool);
-const rosterRepo = new RosterRepository(pool);
-const chatService = new ChatService();
-const leagueService = new LeagueService(
-  leagueRepo,
-  rosterRepo,
-  chatService,
-  pool
-);
+// Helper function to get LeagueService from DI Container
+function getLeagueService(): LeagueService {
+  return Container.getInstance().getLeagueService();
+}
 
 /**
  * GET /api/leagues/my-leagues
@@ -35,7 +26,7 @@ export const getMyLeagues = async (
       throw new ValidationError('User ID not found in request');
     }
 
-    const leagues = await leagueService.getUserLeagues(userId);
+    const leagues = await getLeagueService().getUserLeagues(userId);
 
     return res.status(200).json(leagues);
   } catch (error) {
@@ -64,7 +55,7 @@ export const getLeague = async (
       throw new ValidationError('Invalid league ID');
     }
 
-    const league = await leagueService.getLeagueById(leagueId, userId);
+    const league = await getLeagueService().getLeagueById(leagueId, userId);
 
     return res.status(200).json(league);
   } catch (error) {
@@ -93,7 +84,7 @@ export const joinLeague = async (
       throw new ValidationError('Invalid league ID');
     }
 
-    const result = await leagueService.joinLeague(leagueId, userId);
+    const result = await getLeagueService().joinLeague(leagueId, userId);
 
     return res.status(200).json({
       message: result.message,
@@ -147,7 +138,7 @@ export const createLeague = async (
       throw new ValidationError('Total rosters must be between 2 and 20');
     }
 
-    const league = await leagueService.createLeague(
+    const league = await getLeagueService().createLeague(
       {
         name: name.trim(),
         description,
@@ -203,7 +194,7 @@ export const updateLeague = async (
       throw new ValidationError('No updates provided');
     }
 
-    const updatedLeague = await leagueService.updateLeague(
+    const updatedLeague = await getLeagueService().updateLeague(
       leagueId,
       userId,
       updates
@@ -236,7 +227,7 @@ export const resetLeague = async (
       throw new ValidationError('Invalid league ID');
     }
 
-    const result = await leagueService.resetLeague(leagueId, userId);
+    const result = await getLeagueService().resetLeague(leagueId, userId);
 
     return res.status(200).json(result);
   } catch (error) {
@@ -265,7 +256,7 @@ export const deleteLeague = async (
       throw new ValidationError('Invalid league ID');
     }
 
-    await leagueService.deleteLeague(leagueId, userId);
+    await getLeagueService().deleteLeague(leagueId, userId);
 
     return res.status(200).json({ message: 'League deleted successfully' });
   } catch (error) {
@@ -299,7 +290,7 @@ export const devAddUsersToLeague = async (
       throw new ValidationError('usernames must be a non-empty array');
     }
 
-    const results = await leagueService.bulkAddUsers(
+    const results = await getLeagueService().bulkAddUsers(
       leagueId,
       usernames,
       userId
@@ -332,7 +323,7 @@ export const getLeagueMembers = async (
       throw new ValidationError('Invalid league ID');
     }
 
-    const members = await leagueService.getLeagueMembers(leagueId, userId);
+    const members = await getLeagueService().getLeagueMembers(leagueId, userId);
 
     // Transform to match frontend expectations (camelCase + extract paid from settings)
     const transformedMembers = members.map((member) => ({
@@ -375,7 +366,7 @@ export const toggleMemberPayment = async (
       throw new ValidationError('paid must be a boolean');
     }
 
-    const updatedRoster = await leagueService.updatePaymentStatus(
+    const updatedRoster = await getLeagueService().updatePaymentStatus(
       leagueId,
       rosterId,
       paid,
