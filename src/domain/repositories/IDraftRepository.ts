@@ -7,6 +7,7 @@ export interface DraftData {
   leagueId: number;
   draftType: string;
   rounds: number;
+  totalRosters: number;
   pickTimeSeconds: number | null;
   status: string;
   currentPick: number | null;

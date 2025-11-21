@@ -497,6 +497,7 @@ export class DraftService {
       pickTimeSeconds: row.pick_time_seconds,
       pickDeadline,
       rounds: row.rounds,
+      totalRosters: row.total_rosters,
       startedAt: row.started_at,
       completedAt: row.completed_at,
       settings: row.settings,
@@ -520,9 +521,11 @@ export class DraftService {
     }
 
     const result = await this.pool.query(
-      `SELECT * FROM drafts
-       WHERE league_id = $1
-       ORDER BY created_at DESC`,
+      `SELECT d.*, l.total_rosters
+       FROM drafts d
+       INNER JOIN leagues l ON l.id = d.league_id
+       WHERE d.league_id = $1
+       ORDER BY d.created_at DESC`,
       [leagueId]
     );
 
@@ -540,7 +543,10 @@ export class DraftService {
     }
 
     const result = await this.pool.query(
-      'SELECT * FROM drafts WHERE id = $1 AND league_id = $2',
+      `SELECT d.*, l.total_rosters
+       FROM drafts d
+       INNER JOIN leagues l ON l.id = d.league_id
+       WHERE d.id = $1 AND d.league_id = $2`,
       [draftId, leagueId]
     );
 
@@ -587,7 +593,7 @@ export class DraftService {
     if (params.derbyTimerSeconds !== undefined) settings.derby_timer_seconds = params.derbyTimerSeconds;
     if (params.derbyOnTimeout !== undefined) settings.derby_on_timeout = params.derbyOnTimeout;
 
-    const result = await this.pool.query(
+    const insertResult = await this.pool.query(
       `INSERT INTO drafts (
         league_id, draft_type, third_round_reversal, rounds,
         pick_time_seconds, settings, status, current_roster_id
@@ -601,6 +607,15 @@ export class DraftService {
         params.pickTimeSeconds,
         JSON.stringify(settings),
       ]
+    );
+
+    // Fetch the draft with league info to get total_rosters
+    const result = await this.pool.query(
+      `SELECT d.*, l.total_rosters
+       FROM drafts d
+       INNER JOIN leagues l ON l.id = d.league_id
+       WHERE d.id = $1`,
+      [insertResult.rows[0].id]
     );
 
     return this.mapDraftRow(result.rows[0]);
@@ -699,7 +714,7 @@ export class DraftService {
       settings.derby_on_timeout = params.derbyOnTimeout;
     }
 
-    const result = await this.pool.query(
+    await this.pool.query(
       `UPDATE drafts SET
         draft_type = COALESCE($1, draft_type),
         third_round_reversal = COALESCE($2, third_round_reversal),
@@ -708,8 +723,7 @@ export class DraftService {
         settings = COALESCE($5, settings),
         pick_deadline = $8,
         updated_at = CURRENT_TIMESTAMP
-      WHERE id = $6 AND league_id = $7
-      RETURNING *`,
+      WHERE id = $6 AND league_id = $7`,
       [
         params.draftType,
         params.thirdRoundReversal,
@@ -720,6 +734,15 @@ export class DraftService {
         leagueId,
         settings.pick_deadline || null,
       ]
+    );
+
+    // Fetch the updated draft with league info to get total_rosters
+    const result = await this.pool.query(
+      `SELECT d.*, l.total_rosters
+       FROM drafts d
+       INNER JOIN leagues l ON l.id = d.league_id
+       WHERE d.id = $1`,
+      [draftId]
     );
 
     return this.mapDraftRow(result.rows[0]);
@@ -785,13 +808,12 @@ export class DraftService {
     settings.pick_deadline = new Date(Date.now() + derbyTimerSeconds * 1000).toISOString();
 
     // Update the draft with derby start time and status
-    const updateResult = await this.pool.query(
+    await this.pool.query(
       `UPDATE drafts
        SET settings = $1,
            updated_at = CURRENT_TIMESTAMP,
            pick_deadline = $2
-       WHERE id = $3
-       RETURNING *`,
+       WHERE id = $3`,
       [JSON.stringify(settings), settings.pick_deadline, draftId]
     );
 
@@ -804,7 +826,16 @@ export class DraftService {
       `${username} started the derby! Users can now select their draft positions.`
     );
 
-    return this.mapDraftRow(updateResult.rows[0]);
+    // Fetch the updated draft with league info to get total_rosters
+    const result = await this.pool.query(
+      `SELECT d.*, l.total_rosters
+       FROM drafts d
+       INNER JOIN leagues l ON l.id = d.league_id
+       WHERE d.id = $1`,
+      [draftId]
+    );
+
+    return this.mapDraftRow(result.rows[0]);
   }
 
   /**
@@ -894,8 +925,8 @@ export class DraftService {
     }
 
     // Update draft settings and pick_deadline column
-    const updateResult = await this.pool.query(
-      `UPDATE drafts SET settings = $1, pick_deadline = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3 RETURNING *`,
+    await this.pool.query(
+      `UPDATE drafts SET settings = $1, pick_deadline = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3`,
       [JSON.stringify(settings), settings.pick_deadline || null, draftId]
     );
 
@@ -905,7 +936,16 @@ export class DraftService {
     // Send system message
     await this.sendSystemMessage(leagueId, `${username} selected slot ${slotNumber}`);
 
-    return this.mapDraftRow(updateResult.rows[0]);
+    // Fetch the updated draft with league info to get total_rosters
+    const result = await this.pool.query(
+      `SELECT d.*, l.total_rosters
+       FROM drafts d
+       INNER JOIN leagues l ON l.id = d.league_id
+       WHERE d.id = $1`,
+      [draftId]
+    );
+
+    return this.mapDraftRow(result.rows[0]);
   }
 
   /**
@@ -940,8 +980,8 @@ export class DraftService {
     settings.derby_status = 'paused';
     delete settings.pick_deadline; // Remove the deadline when paused
 
-    const result = await this.pool.query(
-      `UPDATE drafts SET settings = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING *`,
+    await this.pool.query(
+      `UPDATE drafts SET settings = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
       [JSON.stringify(settings), draftId]
     );
 
@@ -950,6 +990,15 @@ export class DraftService {
 
     // Send system message
     await this.sendSystemMessage(leagueId, `${username} paused the derby`);
+
+    // Fetch the updated draft with league info to get total_rosters
+    const result = await this.pool.query(
+      `SELECT d.*, l.total_rosters
+       FROM drafts d
+       INNER JOIN leagues l ON l.id = d.league_id
+       WHERE d.id = $1`,
+      [draftId]
+    );
 
     return this.mapDraftRow(result.rows[0]);
   }
@@ -988,8 +1037,8 @@ export class DraftService {
     const derbyTimerSeconds = settings.derby_timer_seconds || 300;
     settings.pick_deadline = new Date(Date.now() + derbyTimerSeconds * 1000).toISOString();
 
-    const result = await this.pool.query(
-      `UPDATE drafts SET settings = $1, pick_deadline = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3 RETURNING *`,
+    await this.pool.query(
+      `UPDATE drafts SET settings = $1, pick_deadline = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3`,
       [JSON.stringify(settings), settings.pick_deadline, draftId]
     );
 
@@ -998,6 +1047,15 @@ export class DraftService {
 
     // Send system message
     await this.sendSystemMessage(leagueId, `${username} resumed the derby`);
+
+    // Fetch the updated draft with league info to get total_rosters
+    const result = await this.pool.query(
+      `SELECT d.*, l.total_rosters
+       FROM drafts d
+       INNER JOIN leagues l ON l.id = d.league_id
+       WHERE d.id = $1`,
+      [draftId]
+    );
 
     return this.mapDraftRow(result.rows[0]);
   }
@@ -1105,7 +1163,7 @@ export class DraftService {
         d_order.draft_position,
         r.user_id,
         COALESCE(u.username, 'Team ' || r.roster_id) as username,
-        r.team_name
+        NULL as team_name
        FROM draft_order d_order
        INNER JOIN rosters r ON r.id = d_order.roster_id
        LEFT JOIN users u ON u.id = r.user_id

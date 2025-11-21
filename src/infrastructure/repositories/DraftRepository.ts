@@ -14,7 +14,10 @@ export class DraftRepository implements IDraftRepository {
 
   async findById(draftId: number): Promise<DraftData | null> {
     const result = await this.db.query(
-      'SELECT * FROM drafts WHERE id = $1',
+      `SELECT d.*, l.total_rosters
+       FROM drafts d
+       INNER JOIN leagues l ON l.id = d.league_id
+       WHERE d.id = $1`,
       [draftId]
     );
 
@@ -26,6 +29,7 @@ export class DraftRepository implements IDraftRepository {
       leagueId: row.league_id,
       draftType: row.draft_type,
       rounds: row.rounds,
+      totalRosters: row.total_rosters,
       pickTimeSeconds: row.pick_time_seconds,
       status: row.status,
       currentPick: row.current_pick,
@@ -78,9 +82,18 @@ export class DraftRepository implements IDraftRepository {
     fields.push(`updated_at = CURRENT_TIMESTAMP`);
 
     values.push(draftId);
-    const result = await this.db.query(
-      `UPDATE drafts SET ${fields.join(', ')} WHERE id = $${paramIndex} RETURNING *`,
+    await this.db.query(
+      `UPDATE drafts SET ${fields.join(', ')} WHERE id = $${paramIndex}`,
       values
+    );
+
+    // Fetch the updated draft with league info to get total_rosters
+    const result = await this.db.query(
+      `SELECT d.*, l.total_rosters
+       FROM drafts d
+       INNER JOIN leagues l ON l.id = d.league_id
+       WHERE d.id = $1`,
+      [draftId]
     );
 
     const row = result.rows[0];
@@ -89,6 +102,7 @@ export class DraftRepository implements IDraftRepository {
       leagueId: row.league_id,
       draftType: row.draft_type,
       rounds: row.rounds,
+      totalRosters: row.total_rosters,
       pickTimeSeconds: row.pick_time_seconds,
       status: row.status,
       currentPick: row.current_pick,
@@ -107,13 +121,13 @@ export class DraftRepository implements IDraftRepository {
   async getDraftOrder(draftId: number): Promise<DraftOrderEntry[]> {
     const result = await this.db.query(
       `SELECT
-        do.id, do.draft_id, do.roster_id, do.draft_position,
-        r.user_id, u.username, r.team_name
-      FROM draft_order do
-      LEFT JOIN rosters r ON do.roster_id = r.id
+        d_order.id, d_order.draft_id, d_order.roster_id, d_order.draft_position,
+        r.user_id, u.username, NULL as team_name
+      FROM draft_order d_order
+      LEFT JOIN rosters r ON d_order.roster_id = r.id
       LEFT JOIN users u ON r.user_id = u.id
-      WHERE do.draft_id = $1
-      ORDER BY do.draft_position`,
+      WHERE d_order.draft_id = $1
+      ORDER BY d_order.draft_position`,
       [draftId]
     );
 
