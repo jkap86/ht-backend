@@ -627,4 +627,130 @@ export class DraftService {
 
     return this.draftRepository.getDraftOrder(draftId);
   }
+
+  /**
+   * Randomize draft order
+   */
+  async randomizeDraftOrder(leagueId: number, draftId: number, userId: string): Promise<DraftOrderEntry[]> {
+    // Verify commissioner
+    await this.verifyCommissioner(leagueId, userId);
+
+    // Check if draft exists and get settings
+    const draftResult = await this.pool.query(
+      'SELECT id, settings FROM drafts WHERE id = $1 AND league_id = $2',
+      [draftId, leagueId]
+    );
+
+    if (draftResult.rows.length === 0) {
+      throw new NotFoundException('Draft not found');
+    }
+
+    const settings = draftResult.rows[0].settings || {};
+    const isDerby = settings.draft_order === 'derby';
+
+    // Get league info to check total_rosters
+    const leagueResult = await this.pool.query(
+      'SELECT total_rosters FROM leagues WHERE id = $1',
+      [leagueId]
+    );
+
+    if (leagueResult.rows.length === 0) {
+      throw new NotFoundException('League not found');
+    }
+
+    const totalRosters = leagueResult.rows[0].total_rosters;
+
+    // Get all existing rosters for this league (only up to total_rosters)
+    const rostersResult = await this.pool.query(
+      `SELECT id, roster_id FROM rosters
+       WHERE league_id = $1 AND roster_id <= $2
+       ORDER BY roster_id`,
+      [leagueId, totalRosters]
+    );
+
+    // Create missing rosters if needed (for teams without managers in derby drafts)
+    const existingRosterIds = new Set(rostersResult.rows.map((r) => r.roster_id));
+    const missingRosterIds = [];
+
+    for (let i = 1; i <= totalRosters; i++) {
+      if (!existingRosterIds.has(i)) {
+        missingRosterIds.push(i);
+      }
+    }
+
+    // Insert missing rosters with NULL user_id
+    for (const rosterId of missingRosterIds) {
+      await this.pool.query(
+        `INSERT INTO rosters (league_id, roster_id)
+         VALUES ($1, $2)`,
+        [leagueId, rosterId]
+      );
+    }
+
+    // Re-fetch all rosters after creating missing ones (only up to total_rosters)
+    const allRostersResult = await this.pool.query(
+      `SELECT id, roster_id FROM rosters
+       WHERE league_id = $1 AND roster_id <= $2
+       ORDER BY roster_id`,
+      [leagueId, totalRosters]
+    );
+
+    if (allRostersResult.rows.length === 0) {
+      throw new ValidationException('No rosters found in this league');
+    }
+
+    // Delete existing draft order if any
+    await this.pool.query('DELETE FROM draft_order WHERE draft_id = $1', [draftId]);
+
+    // Shuffle the rosters array (Fisher-Yates shuffle)
+    const rosters = [...allRostersResult.rows];
+    for (let i = rosters.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [rosters[i], rosters[j]] = [rosters[j], rosters[i]];
+    }
+
+    // Insert randomized draft order
+    // For derby drafts, set draft_position to NULL initially (users will pick their slots)
+    // For regular drafts, assign sequential positions
+    const insertPromises = rosters.map((roster, index) => {
+      return this.pool.query(
+        `INSERT INTO draft_order (draft_id, roster_id, draft_position)
+         VALUES ($1, $2, $3)`,
+        [draftId, roster.id, isDerby ? null : index + 1]
+      );
+    });
+
+    await Promise.all(insertPromises);
+
+    // Fetch and return the new draft order with roster details
+    const orderResult = await this.pool.query(
+      `SELECT
+        d_order.id,
+        d_order.draft_id,
+        d_order.roster_id,
+        d_order.draft_position,
+        r.user_id,
+        COALESCE(u.username, 'Team ' || r.roster_id) as username,
+        r.team_name
+       FROM draft_order d_order
+       INNER JOIN rosters r ON r.id = d_order.roster_id
+       LEFT JOIN users u ON u.id = r.user_id
+       WHERE d_order.draft_id = $1
+       ORDER BY ${isDerby ? 'd_order.id' : 'd_order.draft_position'}`,
+      [draftId]
+    );
+
+    // Send system message to league chat
+    const orderSummary = orderResult.rows
+      .map((item, index) => `${index + 1}. ${item.username}`)
+      .join('\n');
+
+    await this.sendSystemMessage(
+      leagueId,
+      `Draft order has been randomized!\n\n${orderSummary}`
+    );
+
+    // Map to DraftOrderEntry objects
+    return orderResult.rows.map((row) => DraftOrderEntry.fromDatabase(row));
+  }
 }
