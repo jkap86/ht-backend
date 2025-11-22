@@ -206,4 +206,15 @@ export class DraftQueueRepository implements IDraftQueueRepository {
 
     return result.rows.length > 0;
   }
+
+  async belongsToRoster(queueId: number, rosterId: number, draftId: number): Promise<boolean> {
+    const result = await this.db.query(
+      `SELECT 1 FROM draft_queues
+       WHERE id = $1 AND roster_id = $2 AND draft_id = $3
+       LIMIT 1`,
+      [queueId, rosterId, draftId]
+    );
+
+    return result.rows.length > 0;
+  }
 }

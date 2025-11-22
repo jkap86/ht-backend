@@ -61,6 +61,11 @@ export interface ILeagueRepository {
     leagueId: number,
     commissionerRosterId: number
   ): Promise<void>;
+
+  /**
+   * Check if user is commissioner of a league
+   */
+  isCommissioner(leagueId: number, userId: string): Promise<boolean>;
 }
 
 /**

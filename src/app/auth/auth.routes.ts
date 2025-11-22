@@ -3,6 +3,7 @@ import { Router } from "express";
 import rateLimit from "express-rate-limit";
 import { login, register, me, refresh, searchUsers } from "./auth.controller";
 import { authMiddleware } from "../common/middleware/auth.middleware";
+import { env } from "../config/env.config";
 
 const router = Router();
 
@@ -10,11 +11,11 @@ const router = Router();
 // Enabled in production, disabled in development for convenience
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: process.env.NODE_ENV === "production" ? 5 : 100, // Stricter in production
+  max: env.NODE_ENV === "production" ? 5 : 100, // Stricter in production
   message: "Too many authentication attempts, please try again later",
   standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
   legacyHeaders: false, // Disable the `X-RateLimit-*` headers
-  skip: () => process.env.NODE_ENV !== "production", // Skip in development
+  skip: () => env.NODE_ENV !== "production", // Skip in development
 });
 
 // POST /api/auth/register

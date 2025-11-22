@@ -1,9 +1,9 @@
 import express from "express";
 import cors from "cors";
-import dotenv from "dotenv";
 import { createServer } from "http";
 import cron from "node-cron";
 
+import { env } from "./config/env.config";
 import { pool } from "./db/pool";
 import { Container } from "./infrastructure/di/Container";
 import { errorHandler } from "./app/common/middleware/error.middleware";
@@ -11,8 +11,6 @@ import { initializeSocketService } from "./app/runtime/socket/socket.service";
 import { processExpiredDerbyPicks } from "./app/runtime/jobs/derby-autopick.service";
 import { processExpiredDraftPicks } from "./app/runtime/jobs/draft-autopick.service";
 import { syncPlayersFromSleeper } from "./app/runtime/jobs/player-sync.service";
-
-dotenv.config();
 
 // Initialize DI Container before loading routes
 Container.initialize(pool);
@@ -26,12 +24,12 @@ const corsOptions: cors.CorsOptions = {
     if (!origin) return callback(null, true);
 
     // In development, allow any localhost port
-    if (process.env.NODE_ENV !== 'production' && origin.startsWith('http://localhost:')) {
+    if (env.NODE_ENV !== 'production' && origin.startsWith('http://localhost:')) {
       return callback(null, true);
     }
 
     // In production, use the configured URL
-    if (process.env.FRONTEND_URL && origin === process.env.FRONTEND_URL) {
+    if (env.FRONTEND_URL && origin === env.FRONTEND_URL) {
       return callback(null, true);
     }
 
@@ -66,7 +64,7 @@ app.use("/api", router);
 // Global error handler (must be last middleware before listen)
 app.use(errorHandler);
 
-const PORT = process.env.PORT || 5000;
+const PORT = env.PORT;
 
 // Create HTTP server and initialize Socket.IO
 const server = createServer(app);

@@ -206,5 +206,27 @@ export class LeagueRepository implements ILeagueRepository {
       [commissionerRosterId, leagueId]
     );
   }
+
+  async isCommissioner(leagueId: number, userId: string): Promise<boolean> {
+    const result = await this.db.query(
+      `SELECT l.settings->>'commissioner_roster_id' as commissioner_roster_id,
+              r.roster_id
+       FROM leagues l
+       INNER JOIN rosters r ON r.league_id = l.id AND r.user_id = $2
+       WHERE l.id = $1`,
+      [leagueId, userId]
+    );
+
+    if (result.rows.length === 0) {
+      return false;
+    }
+
+    const row = result.rows[0];
+    return (
+      row.commissioner_roster_id &&
+      row.roster_id &&
+      row.commissioner_roster_id === row.roster_id.toString()
+    );
+  }
 }
 

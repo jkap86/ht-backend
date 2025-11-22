@@ -42,4 +42,9 @@ export interface IDraftQueueRepository {
    * Check if a player is in a roster's queue
    */
   isPlayerInQueue(draftId: number, rosterId: number, playerId: number): Promise<boolean>;
+
+  /**
+   * Check if a queue entry belongs to a specific roster
+   */
+  belongsToRoster(queueId: number, rosterId: number, draftId: number): Promise<boolean>;
 }

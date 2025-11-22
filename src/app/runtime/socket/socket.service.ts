@@ -3,6 +3,8 @@ import { Server as HttpServer } from "http";
 import { Server, Socket } from "socket.io";
 import jwt from "jsonwebtoken";
 import { Container } from "../../../infrastructure/di/Container";
+import { env } from "../../../config/env.config";
+import { SocketEvents } from "./socketEvents";
 
 interface AuthenticatedSocket extends Socket {
   userId?: string;
@@ -59,14 +61,14 @@ export class SocketService {
 
           // In development, allow any localhost port
           if (
-            process.env.NODE_ENV !== "production" &&
+            env.NODE_ENV !== "production" &&
             origin.startsWith("http://localhost:")
           ) {
             return callback(null, true);
           }
 
           // In production, use the configured URL or check allowed list
-          if (process.env.FRONTEND_URL && origin === process.env.FRONTEND_URL) {
+          if (env.FRONTEND_URL && origin === env.FRONTEND_URL) {
             return callback(null, true);
           }
 
@@ -97,12 +99,7 @@ export class SocketService {
       }
 
       try {
-        const jwtSecret = process.env.JWT_SECRET;
-        if (!jwtSecret) {
-          throw new Error("JWT_SECRET not configured");
-        }
-
-        const decoded = jwt.verify(token, jwtSecret) as {
+        const decoded = jwt.verify(token, env.JWT_SECRET) as {
           sub: string;
           username: string;
         };
@@ -115,11 +112,11 @@ export class SocketService {
   }
 
   private setupEventHandlers() {
-    this.io.on("connection", (socket: AuthenticatedSocket) => {
+    this.io.on(SocketEvents.CONNECTION, (socket: AuthenticatedSocket) => {
       console.log(`User connected: ${socket.userId}`);
 
       // Join a league chat room
-      socket.on("join_league", (data: JoinLeagueData) => {
+      socket.on(SocketEvents.JOIN_LEAGUE, (data: JoinLeagueData) => {
         const { leagueId } = data;
         const roomName = `league_${leagueId}`;
         socket.join(roomName);
@@ -127,7 +124,7 @@ export class SocketService {
       });
 
       // Leave a league chat room
-      socket.on("leave_league", (data: JoinLeagueData) => {
+      socket.on(SocketEvents.LEAVE_LEAGUE, (data: JoinLeagueData) => {
         const { leagueId } = data;
         const roomName = `league_${leagueId}`;
         socket.leave(roomName);
@@ -135,7 +132,7 @@ export class SocketService {
       });
 
       // Join a DM conversation room
-      socket.on("join_dm", (data: JoinDMData) => {
+      socket.on(SocketEvents.JOIN_DM, (data: JoinDMData) => {
         const { conversationId } = data;
         const roomName = `dm_${conversationId}`;
         socket.join(roomName);
@@ -145,7 +142,7 @@ export class SocketService {
       });
 
       // Leave a DM conversation room
-      socket.on("leave_dm", (data: JoinDMData) => {
+      socket.on(SocketEvents.LEAVE_DM, (data: JoinDMData) => {
         const { conversationId } = data;
         const roomName = `dm_${conversationId}`;
         socket.leave(roomName);
@@ -155,14 +152,14 @@ export class SocketService {
       });
 
       // Generic join room handler (used by chat socket client)
-      socket.on("join_room", (data: { room: string }) => {
+      socket.on(SocketEvents.JOIN_ROOM, (data: { room: string }) => {
         const { room } = data;
         socket.join(room);
         console.log(`User ${socket.userId} joined room ${room}`);
       });
 
       // Generic leave room handler
-      socket.on("leave_room", (data: { room: string }) => {
+      socket.on(SocketEvents.LEAVE_ROOM, (data: { room: string }) => {
         const { room } = data;
         socket.leave(room);
         console.log(`User ${socket.userId} left room ${room}`);
@@ -170,7 +167,7 @@ export class SocketService {
 
       // Send a league chat message
       socket.on(
-        "send_league_chat",
+        SocketEvents.SEND_LEAGUE_CHAT,
         async (data: { room: string; message: string; metadata?: any }) => {
           const { room, message, metadata = {} } = data;
           const senderId = socket.userId;
@@ -243,7 +240,7 @@ export class SocketService {
 
       // Send a direct message
       socket.on(
-        "send_dm",
+        SocketEvents.SEND_DM,
         async (data: { room: string; message: string; metadata?: any }) => {
           const { room, message, metadata = {} } = data;
           const senderId = socket.userId;
@@ -302,7 +299,7 @@ export class SocketService {
       );
 
       // Handle disconnection
-      socket.on("disconnect", () => {
+      socket.on(SocketEvents.DISCONNECT, () => {
         console.log(`User disconnected: ${socket.userId}`);
       });
     });
@@ -323,7 +320,7 @@ export class SocketService {
       `[SocketService] Number of clients in room ${roomName}:`,
       sockets ? sockets.size : 0
     );
-    this.io.to(roomName).emit("new_message", message);
+    this.io.to(roomName).emit(SocketEvents.NEW_MESSAGE, message);
   }
 
   /**
@@ -338,7 +335,7 @@ export class SocketService {
       `[SocketService] Number of clients in room ${roomName}:`,
       sockets ? sockets.size : 0
     );
-    this.io.to(roomName).emit("new_dm", message);
+    this.io.to(roomName).emit(SocketEvents.NEW_DM, message);
   }
 
   /**
@@ -354,7 +351,7 @@ export class SocketService {
       `[SocketService] Number of clients in room ${roomName}:`,
       sockets ? sockets.size : 0
     );
-    this.io.to(roomName).emit("derby_updated", data);
+    this.io.to(roomName).emit(SocketEvents.DERBY_UPDATED, data);
   }
 
   /**

@@ -3,12 +3,13 @@ import { DraftData } from '../../../domain/repositories/IDraftRepository';
 import { DraftPick } from '../../../domain/models/DraftPick';
 import { DraftOrderEntry } from '../../../domain/models/DraftOrderEntry';
 import { getSocketService } from './socket.service';
+import { SocketEvents, DraftEventTypes } from './socketEvents';
 
 export class SocketDraftEventsPublisher implements IDraftEventsPublisher {
   emitDraftStarted(leagueId: number, draft: DraftData, currentPicker: DraftOrderEntry): void {
     const socketService = getSocketService();
-    socketService.emitToRoom(`league_${leagueId}`, 'draft_event', {
-      event_type: 'draft_started',
+    socketService.emitToRoom(`league_${leagueId}`, SocketEvents.DRAFT_EVENT, {
+      event_type: DraftEventTypes.DRAFT_STARTED,
       draft_id: draft.id,
       draft,
       current_picker: currentPicker
@@ -22,8 +23,8 @@ export class SocketDraftEventsPublisher implements IDraftEventsPublisher {
     nextPicker: DraftOrderEntry | null
   ): void {
     const socketService = getSocketService();
-    socketService.emitToRoom(`league_${leagueId}`, 'draft_event', {
-      event_type: 'pick_made',
+    socketService.emitToRoom(`league_${leagueId}`, SocketEvents.DRAFT_EVENT, {
+      event_type: DraftEventTypes.PICK_MADE,
       draft_id: draft.id,
       pick,
       draft,
@@ -37,8 +38,8 @@ export class SocketDraftEventsPublisher implements IDraftEventsPublisher {
     draft: DraftData
   ): void {
     const socketService = getSocketService();
-    socketService.emitToRoom(`league_${leagueId}`, 'draft_event', {
-      event_type: 'picker_changed',
+    socketService.emitToRoom(`league_${leagueId}`, SocketEvents.DRAFT_EVENT, {
+      event_type: DraftEventTypes.PICKER_CHANGED,
       draft_id: draft.id,
       current_picker: currentPicker,
       draft
@@ -47,8 +48,8 @@ export class SocketDraftEventsPublisher implements IDraftEventsPublisher {
 
   emitDraftPaused(leagueId: number, draft: DraftData): void {
     const socketService = getSocketService();
-    socketService.emitToRoom(`league_${leagueId}`, 'draft_event', {
-      event_type: 'draft_paused',
+    socketService.emitToRoom(`league_${leagueId}`, SocketEvents.DRAFT_EVENT, {
+      event_type: DraftEventTypes.DRAFT_PAUSED,
       draft_id: draft.id,
       draft
     });
@@ -56,8 +57,8 @@ export class SocketDraftEventsPublisher implements IDraftEventsPublisher {
 
   emitDraftResumed(leagueId: number, draft: DraftData, currentPicker: DraftOrderEntry): void {
     const socketService = getSocketService();
-    socketService.emitToRoom(`league_${leagueId}`, 'draft_event', {
-      event_type: 'draft_resumed',
+    socketService.emitToRoom(`league_${leagueId}`, SocketEvents.DRAFT_EVENT, {
+      event_type: DraftEventTypes.DRAFT_RESUMED,
       draft_id: draft.id,
       draft,
       current_picker: currentPicker
@@ -66,8 +67,8 @@ export class SocketDraftEventsPublisher implements IDraftEventsPublisher {
 
   emitDraftCompleted(leagueId: number, draft: DraftData): void {
     const socketService = getSocketService();
-    socketService.emitToRoom(`league_${leagueId}`, 'draft_event', {
-      event_type: 'draft_completed',
+    socketService.emitToRoom(`league_${leagueId}`, SocketEvents.DRAFT_EVENT, {
+      event_type: DraftEventTypes.DRAFT_COMPLETED,
       draft_id: draft.id,
       draft
     });
@@ -80,8 +81,8 @@ export class SocketDraftEventsPublisher implements IDraftEventsPublisher {
     nextPicker: DraftOrderEntry | null
   ): void {
     const socketService = getSocketService();
-    socketService.emitToRoom(`league_${leagueId}`, 'draft_event', {
-      event_type: 'auto_pick_occurred',
+    socketService.emitToRoom(`league_${leagueId}`, SocketEvents.DRAFT_EVENT, {
+      event_type: DraftEventTypes.AUTO_PICK_OCCURRED,
       draft_id: draft.id,
       pick,
       draft,

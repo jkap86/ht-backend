@@ -1,6 +1,5 @@
 // src/app/drafts/drafts.controller.ts
 import { Response, NextFunction } from "express";
-import { pool } from "../../db/pool";
 import { AuthRequest } from "../common/middleware/auth.middleware";
 import {
   NotFoundError,
@@ -13,6 +12,19 @@ import { ChatService } from "../../application/services/ChatService";
 // Helper to get ChatService from DI Container
 function getChatService(): ChatService {
   return Container.getInstance().getChatService();
+}
+
+// Helper to get repositories from DI Container
+function getLeagueRepository() {
+  return Container.getInstance().getLeagueRepository();
+}
+
+function getRosterRepository() {
+  return Container.getInstance().getRosterRepository();
+}
+
+function getDraftQueueRepository() {
+  return Container.getInstance().getDraftQueueRepository();
 }
 
 interface DraftRow {
@@ -62,48 +74,6 @@ function mapDraftRow(row: DraftRow) {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
-}
-
-/**
- * Helper: Check if user is commissioner of a league
- */
-async function isCommissioner(
-  leagueId: number,
-  userId: string
-): Promise<boolean> {
-  const result = await pool.query(
-    `SELECT l.settings->>'commissioner_roster_id' as commissioner_roster_id,
-            r.roster_id
-     FROM leagues l
-     INNER JOIN rosters r ON r.league_id = l.id AND r.user_id = $2
-     WHERE l.id = $1`,
-    [leagueId, userId]
-  );
-
-  if (result.rows.length === 0) {
-    return false;
-  }
-
-  const row = result.rows[0];
-  return (
-    row.commissioner_roster_id &&
-    row.roster_id &&
-    row.commissioner_roster_id === row.roster_id.toString()
-  );
-}
-
-/**
- * Helper: Check if user has access to league
- */
-async function hasLeagueAccess(
-  leagueId: number,
-  userId: string
-): Promise<boolean> {
-  const result = await pool.query(
-    "SELECT id FROM rosters WHERE league_id = $1 AND user_id = $2",
-    [leagueId, userId]
-  );
-  return result.rows.length > 0;
 }
 
 /**
@@ -642,7 +612,8 @@ export const getDraftPicks = async (
     }
 
     // Check if user has access to league
-    if (!(await hasLeagueAccess(leagueId, userId))) {
+    const leagueRepo = getLeagueRepository();
+    if (!(await leagueRepo.isUserMember(leagueId, userId))) {
       throw new ForbiddenError("You don't have access to this league");
     }
 
@@ -674,7 +645,8 @@ export const getAvailablePlayers = async (
     }
 
     // Check if user has access to league
-    if (!(await hasLeagueAccess(leagueId, userId))) {
+    const leagueRepo = getLeagueRepository();
+    if (!(await leagueRepo.isUserMember(leagueId, userId))) {
       throw new ForbiddenError("You don't have access to this league");
     }
 
@@ -719,7 +691,8 @@ export const getDraftState = async (
     }
 
     // Check if user has access to league
-    if (!(await hasLeagueAccess(leagueId, userId))) {
+    const leagueRepo = getLeagueRepository();
+    if (!(await leagueRepo.isUserMember(leagueId, userId))) {
       throw new ForbiddenError("You don't have access to this league");
     }
 
@@ -750,22 +723,15 @@ export const getQueue = async (
       throw new ValidationError("Invalid parameters");
     }
 
-    // Check if user has access to league
-    if (!(await hasLeagueAccess(leagueId, userId))) {
-      throw new ForbiddenError("You don't have access to this league");
-    }
+    // Get user's roster
+    const rosterRepo = getRosterRepository();
+    const roster = await rosterRepo.findByLeagueAndUser(leagueId, userId);
 
-    // Get user's roster ID
-    const rosterResult = await pool.query(
-      'SELECT id FROM rosters WHERE league_id = $1 AND user_id = $2',
-      [leagueId, userId]
-    );
-
-    if (rosterResult.rows.length === 0) {
+    if (!roster) {
       throw new ForbiddenError("You are not part of this league");
     }
 
-    const rosterId = rosterResult.rows[0].id;
+    const rosterId = roster.id;
 
     const queueService = Container.getInstance().getDraftQueueService();
     const queue = await queueService.getQueueForRoster(draftId, rosterId);
@@ -795,22 +761,15 @@ export const addToQueue = async (
       throw new ValidationError("Invalid parameters");
     }
 
-    // Check if user has access to league
-    if (!(await hasLeagueAccess(leagueId, userId))) {
-      throw new ForbiddenError("You don't have access to this league");
-    }
+    // Get user's roster
+    const rosterRepo = getRosterRepository();
+    const roster = await rosterRepo.findByLeagueAndUser(leagueId, userId);
 
-    // Get user's roster ID
-    const rosterResult = await pool.query(
-      'SELECT id FROM rosters WHERE league_id = $1 AND user_id = $2',
-      [leagueId, userId]
-    );
-
-    if (rosterResult.rows.length === 0) {
+    if (!roster) {
       throw new ForbiddenError("You are not part of this league");
     }
 
-    const rosterId = rosterResult.rows[0].id;
+    const rosterId = roster.id;
 
     const queueService = Container.getInstance().getDraftQueueService();
     const queueEntry = await queueService.addToQueue(draftId, rosterId, playerId);
@@ -840,30 +799,21 @@ export const removeFromQueue = async (
       throw new ValidationError("Invalid parameters");
     }
 
-    // Check if user has access to league
-    if (!(await hasLeagueAccess(leagueId, userId))) {
-      throw new ForbiddenError("You don't have access to this league");
-    }
+    // Get user's roster
+    const rosterRepo = getRosterRepository();
+    const roster = await rosterRepo.findByLeagueAndUser(leagueId, userId);
 
-    // Get user's roster ID
-    const rosterResult = await pool.query(
-      'SELECT id FROM rosters WHERE league_id = $1 AND user_id = $2',
-      [leagueId, userId]
-    );
-
-    if (rosterResult.rows.length === 0) {
+    if (!roster) {
       throw new ForbiddenError("You are not part of this league");
     }
 
-    const rosterId = rosterResult.rows[0].id;
+    const rosterId = roster.id;
 
     // Verify the queue entry belongs to the user
-    const queueCheck = await pool.query(
-      'SELECT 1 FROM draft_queues WHERE id = $1 AND roster_id = $2 AND draft_id = $3',
-      [queueId, rosterId, draftId]
-    );
+    const queueRepo = getDraftQueueRepository();
+    const ownsEntry = await queueRepo.belongsToRoster(queueId, rosterId, draftId);
 
-    if (queueCheck.rows.length === 0) {
+    if (!ownsEntry) {
       throw new ForbiddenError("Queue entry not found or does not belong to you");
     }
 
@@ -895,22 +845,15 @@ export const reorderQueue = async (
       throw new ValidationError("Invalid parameters");
     }
 
-    // Check if user has access to league
-    if (!(await hasLeagueAccess(leagueId, userId))) {
-      throw new ForbiddenError("You don't have access to this league");
-    }
+    // Get user's roster
+    const rosterRepo = getRosterRepository();
+    const roster = await rosterRepo.findByLeagueAndUser(leagueId, userId);
 
-    // Get user's roster ID
-    const rosterResult = await pool.query(
-      'SELECT id FROM rosters WHERE league_id = $1 AND user_id = $2',
-      [leagueId, userId]
-    );
-
-    if (rosterResult.rows.length === 0) {
+    if (!roster) {
       throw new ForbiddenError("You are not part of this league");
     }
 
-    const rosterId = rosterResult.rows[0].id;
+    const rosterId = roster.id;
 
     const queueService = Container.getInstance().getDraftQueueService();
     await queueService.reorderQueue(draftId, rosterId, updates);
