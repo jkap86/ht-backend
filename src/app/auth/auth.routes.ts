@@ -3,7 +3,7 @@ import { Router } from "express";
 import rateLimit from "express-rate-limit";
 import { login, register, me, refresh, searchUsers } from "./auth.controller";
 import { authMiddleware } from "../common/middleware/auth.middleware";
-import { env } from "../config/env.config";
+import { env } from "../../config/env.config";
 
 const router = Router();
 
