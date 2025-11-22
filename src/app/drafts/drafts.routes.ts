@@ -20,6 +20,10 @@ import {
   getDraftPicks,
   getAvailablePlayers,
   getDraftState,
+  getQueue,
+  addToQueue,
+  removeFromQueue,
+  reorderQueue,
 } from "./drafts.controller";
 
 const router = Router();
@@ -84,5 +88,21 @@ router.post("/:leagueId/drafts/:draftId/resume", resumeDraftRoom);
 
 // POST /api/leagues/:leagueId/drafts/:draftId/pick - Make a player pick (user's turn only)
 router.post("/:leagueId/drafts/:draftId/pick", makePick);
+
+// ==============================
+// DRAFT QUEUE (Player Watchlist)
+// ==============================
+
+// GET /api/leagues/:leagueId/drafts/:draftId/queue - Get user's queue
+router.get("/:leagueId/drafts/:draftId/queue", getQueue);
+
+// POST /api/leagues/:leagueId/drafts/:draftId/queue - Add player to queue
+router.post("/:leagueId/drafts/:draftId/queue", addToQueue);
+
+// DELETE /api/leagues/:leagueId/drafts/:draftId/queue/:queueId - Remove from queue
+router.delete("/:leagueId/drafts/:draftId/queue/:queueId", removeFromQueue);
+
+// PUT /api/leagues/:leagueId/drafts/:draftId/queue/reorder - Reorder queue
+router.put("/:leagueId/drafts/:draftId/queue/reorder", reorderQueue);
 
 export default router;

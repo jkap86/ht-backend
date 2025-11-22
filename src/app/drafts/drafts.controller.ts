@@ -731,3 +731,192 @@ export const getDraftState = async (
     next(error);
   }
 };
+
+/**
+ * GET /api/leagues/:leagueId/drafts/:draftId/queue
+ * Get user's draft queue
+ */
+export const getQueue = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const leagueId = parseInt(req.params.leagueId, 10);
+    const draftId = parseInt(req.params.draftId, 10);
+    const userId = req.user?.userId;
+
+    if (isNaN(leagueId) || isNaN(draftId) || !userId) {
+      throw new ValidationError("Invalid parameters");
+    }
+
+    // Check if user has access to league
+    if (!(await hasLeagueAccess(leagueId, userId))) {
+      throw new ForbiddenError("You don't have access to this league");
+    }
+
+    // Get user's roster ID
+    const rosterResult = await pool.query(
+      'SELECT id FROM rosters WHERE league_id = $1 AND user_id = $2',
+      [leagueId, userId]
+    );
+
+    if (rosterResult.rows.length === 0) {
+      throw new ForbiddenError("You are not part of this league");
+    }
+
+    const rosterId = rosterResult.rows[0].id;
+
+    const queueService = Container.getInstance().getDraftQueueService();
+    const queue = await queueService.getQueueForRoster(draftId, rosterId);
+
+    return res.status(200).json(queue);
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * POST /api/leagues/:leagueId/drafts/:draftId/queue
+ * Add player to queue
+ */
+export const addToQueue = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const leagueId = parseInt(req.params.leagueId, 10);
+    const draftId = parseInt(req.params.draftId, 10);
+    const userId = req.user?.userId;
+    const { playerId } = req.body;
+
+    if (isNaN(leagueId) || isNaN(draftId) || !userId || !playerId) {
+      throw new ValidationError("Invalid parameters");
+    }
+
+    // Check if user has access to league
+    if (!(await hasLeagueAccess(leagueId, userId))) {
+      throw new ForbiddenError("You don't have access to this league");
+    }
+
+    // Get user's roster ID
+    const rosterResult = await pool.query(
+      'SELECT id FROM rosters WHERE league_id = $1 AND user_id = $2',
+      [leagueId, userId]
+    );
+
+    if (rosterResult.rows.length === 0) {
+      throw new ForbiddenError("You are not part of this league");
+    }
+
+    const rosterId = rosterResult.rows[0].id;
+
+    const queueService = Container.getInstance().getDraftQueueService();
+    const queueEntry = await queueService.addToQueue(draftId, rosterId, playerId);
+
+    return res.status(201).json(queueEntry);
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * DELETE /api/leagues/:leagueId/drafts/:draftId/queue/:queueId
+ * Remove player from queue
+ */
+export const removeFromQueue = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const leagueId = parseInt(req.params.leagueId, 10);
+    const draftId = parseInt(req.params.draftId, 10);
+    const queueId = parseInt(req.params.queueId, 10);
+    const userId = req.user?.userId;
+
+    if (isNaN(leagueId) || isNaN(draftId) || isNaN(queueId) || !userId) {
+      throw new ValidationError("Invalid parameters");
+    }
+
+    // Check if user has access to league
+    if (!(await hasLeagueAccess(leagueId, userId))) {
+      throw new ForbiddenError("You don't have access to this league");
+    }
+
+    // Get user's roster ID
+    const rosterResult = await pool.query(
+      'SELECT id FROM rosters WHERE league_id = $1 AND user_id = $2',
+      [leagueId, userId]
+    );
+
+    if (rosterResult.rows.length === 0) {
+      throw new ForbiddenError("You are not part of this league");
+    }
+
+    const rosterId = rosterResult.rows[0].id;
+
+    // Verify the queue entry belongs to the user
+    const queueCheck = await pool.query(
+      'SELECT 1 FROM draft_queues WHERE id = $1 AND roster_id = $2 AND draft_id = $3',
+      [queueId, rosterId, draftId]
+    );
+
+    if (queueCheck.rows.length === 0) {
+      throw new ForbiddenError("Queue entry not found or does not belong to you");
+    }
+
+    const queueService = Container.getInstance().getDraftQueueService();
+    await queueService.removeFromQueue(queueId);
+
+    return res.status(204).send();
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * PUT /api/leagues/:leagueId/drafts/:draftId/queue/reorder
+ * Reorder queue
+ */
+export const reorderQueue = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const leagueId = parseInt(req.params.leagueId, 10);
+    const draftId = parseInt(req.params.draftId, 10);
+    const userId = req.user?.userId;
+    const { updates } = req.body;
+
+    if (isNaN(leagueId) || isNaN(draftId) || !userId || !updates || !Array.isArray(updates)) {
+      throw new ValidationError("Invalid parameters");
+    }
+
+    // Check if user has access to league
+    if (!(await hasLeagueAccess(leagueId, userId))) {
+      throw new ForbiddenError("You don't have access to this league");
+    }
+
+    // Get user's roster ID
+    const rosterResult = await pool.query(
+      'SELECT id FROM rosters WHERE league_id = $1 AND user_id = $2',
+      [leagueId, userId]
+    );
+
+    if (rosterResult.rows.length === 0) {
+      throw new ForbiddenError("You are not part of this league");
+    }
+
+    const rosterId = rosterResult.rows[0].id;
+
+    const queueService = Container.getInstance().getDraftQueueService();
+    await queueService.reorderQueue(draftId, rosterId, updates);
+
+    return res.status(200).json({ message: 'Queue reordered successfully' });
+  } catch (error) {
+    next(error);
+  }
+};

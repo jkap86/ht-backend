@@ -6,6 +6,7 @@ import { ILeagueChatRepository } from '../../domain/repositories/ILeagueChatRepo
 import { IDirectMessageRepository } from '../../domain/repositories/IDirectMessageRepository';
 import { IPlayerRepository } from '../../domain/repositories/IPlayerRepository';
 import { IDraftRepository } from '../../domain/repositories/IDraftRepository';
+import { IDraftQueueRepository } from '../../domain/repositories/IDraftQueueRepository';
 import { UserRepository } from '../repositories/UserRepository';
 import { LeagueRepository } from '../repositories/LeagueRepository';
 import { RosterRepository } from '../repositories/RosterRepository';
@@ -13,12 +14,14 @@ import { LeagueChatRepository } from '../repositories/LeagueChatRepository';
 import { DirectMessageRepository } from '../repositories/DirectMessageRepository';
 import { PlayerRepository } from '../repositories/PlayerRepository';
 import { DraftRepository } from '../repositories/DraftRepository';
+import { DraftQueueRepository } from '../repositories/DraftQueueRepository';
 import { AuthService } from '../../application/services/AuthService';
 import { LeagueService } from '../../application/services/LeagueService';
 import { ChatService } from '../../application/services/ChatService';
 import { PlayerSyncService } from '../../application/services/PlayerSyncService';
 import { PlayerService } from '../../application/services/PlayerService';
 import { DraftService } from '../../application/services/DraftService';
+import { DraftQueueService } from '../../application/services/DraftQueueService';
 import { SocketChatEventsPublisher } from '../../app/runtime/socket/SocketChatEventsPublisher';
 import { SocketDraftEventsPublisher } from '../../app/runtime/socket/SocketDraftEventsPublisher';
 import { IChatEventsPublisher } from '../../application/services/IChatEventsPublisher';
@@ -41,6 +44,7 @@ export class Container {
   private _directMessageRepository?: IDirectMessageRepository;
   private _playerRepository?: IPlayerRepository;
   private _draftRepository?: IDraftRepository;
+  private _draftQueueRepository?: IDraftQueueRepository;
 
   // Services
   private _authService?: AuthService;
@@ -52,6 +56,7 @@ export class Container {
   private _sleeperApiClient?: SleeperApiClient;
   private _draftService?: DraftService;
   private _draftEventsPublisher?: IDraftEventsPublisher;
+  private _draftQueueService?: DraftQueueService;
 
   private constructor(pool: Pool) {
     this.pool = pool;
@@ -235,6 +240,29 @@ export class Container {
   }
 
   /**
+   * Get Draft Queue Repository
+   */
+  getDraftQueueRepository(): IDraftQueueRepository {
+    if (!this._draftQueueRepository) {
+      this._draftQueueRepository = new DraftQueueRepository(this.pool);
+    }
+    return this._draftQueueRepository;
+  }
+
+  /**
+   * Get Draft Queue Service
+   */
+  getDraftQueueService(): DraftQueueService {
+    if (!this._draftQueueService) {
+      this._draftQueueService = new DraftQueueService(
+        this.getDraftQueueRepository(),
+        this.getDraftRepository()
+      );
+    }
+    return this._draftQueueService;
+  }
+
+  /**
    * Get Draft Service
    */
   getDraftService(): DraftService {
@@ -242,7 +270,8 @@ export class Container {
       this._draftService = new DraftService(
         this.getDraftRepository(),
         this.pool,
-        this.getDraftEventsPublisher()
+        this.getDraftEventsPublisher(),
+        this.getDraftQueueService()
       );
     }
     return this._draftService;
@@ -259,6 +288,7 @@ export class Container {
     this._directMessageRepository = undefined;
     this._playerRepository = undefined;
     this._draftRepository = undefined;
+    this._draftQueueRepository = undefined;
     this._authService = undefined;
     this._leagueService = undefined;
     this._chatService = undefined;
@@ -268,5 +298,6 @@ export class Container {
     this._sleeperApiClient = undefined;
     this._draftService = undefined;
     this._draftEventsPublisher = undefined;
+    this._draftQueueService = undefined;
   }
 }

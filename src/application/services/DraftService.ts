@@ -4,13 +4,15 @@ import { DraftPick } from '../../domain/models/DraftPick';
 import { DraftOrderEntry } from '../../domain/models/DraftOrderEntry';
 import { Player } from '../../domain/models/Player';
 import { IDraftEventsPublisher } from './IDraftEventsPublisher';
+import { DraftQueueService } from './DraftQueueService';
 import { ValidationException, NotFoundException, ServerException } from '../../domain/exceptions/AuthExceptions';
 
 export class DraftService {
   constructor(
     private readonly draftRepository: IDraftRepository,
     private readonly pool: Pool,
-    private readonly eventsPublisher?: IDraftEventsPublisher
+    private readonly eventsPublisher?: IDraftEventsPublisher,
+    private readonly queueService?: DraftQueueService
   ) {}
 
   /**
@@ -220,17 +222,31 @@ export class DraftService {
     const currentPicker = await this.getCurrentPicker(draft, draftOrder);
     if (!currentPicker) return null;
 
-    // Get available players
-    const playerPool = draft.settings?.player_pool || 'all';
-    const availablePlayers = await this.draftRepository.getAvailablePlayers(draftId, playerPool);
+    let selectedPlayer: Player | undefined;
 
-    if (availablePlayers.length === 0) {
-      // No players available - complete draft?
-      return null;
+    // Try to use queued player first
+    if (this.queueService) {
+      const nextQueued = await this.queueService.getNextQueuedPlayer(draftId, currentPicker.rosterId);
+      if (nextQueued && nextQueued.player) {
+        selectedPlayer = nextQueued.player;
+        console.log(`[Draft Auto-Pick] Using queued player: ${selectedPlayer.fullName}`);
+      }
     }
 
-    // Select random player
-    const randomPlayer = availablePlayers[Math.floor(Math.random() * availablePlayers.length)];
+    // Fall back to random player if no queue or queue is empty
+    if (!selectedPlayer) {
+      const playerPool = draft.settings?.player_pool || 'all';
+      const availablePlayers = await this.draftRepository.getAvailablePlayers(draftId, playerPool);
+
+      if (availablePlayers.length === 0) {
+        // No players available - complete draft?
+        return null;
+      }
+
+      // Select random player
+      selectedPlayer = availablePlayers[Math.floor(Math.random() * availablePlayers.length)];
+      console.log(`[Draft Auto-Pick] No queue, selecting random player: ${selectedPlayer.fullName}`);
+    }
 
     // Create auto-pick
     const pick = await this.draftRepository.createPick({
@@ -239,15 +255,20 @@ export class DraftService {
       round: draft.currentRound!,
       pickInRound: this.getPickInRound(draft, draftOrder),
       rosterId: currentPicker.rosterId,
-      playerId: randomPlayer.id,
+      playerId: selectedPlayer.id,
       isAutoPick: true,
       pickTimeSeconds: 0
     });
 
+    // Remove player from all queues
+    if (this.queueService) {
+      await this.queueService.removePlayerFromAllQueues(draftId, selectedPlayer.id);
+    }
+
     // Send system message
     await this.sendSystemMessage(
       draft.leagueId,
-      `⏰ ${currentPicker.username || 'Team'} auto-picked ${randomPlayer.fullName} (${randomPlayer.position})`
+      `⏰ ${currentPicker.username || 'Team'} auto-picked ${selectedPlayer.fullName} (${selectedPlayer.position})`
     );
 
     // Advance draft
