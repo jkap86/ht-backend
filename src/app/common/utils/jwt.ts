@@ -1,6 +1,6 @@
 // src/app/utils/jwt.ts
 import * as jwt from "jsonwebtoken";
-import { env } from "../../../../config/env.config";
+import { env } from "../../../config/env.config";
 
 export interface JwtPayload {
   sub: string; // user id
