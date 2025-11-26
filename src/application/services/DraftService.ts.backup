@@ -1,0 +1,1233 @@
+import { Pool } from 'pg';
+import { IDraftRepository, DraftData, PlayerFilters } from '../../domain/repositories/IDraftRepository';
+import { DraftPick } from '../../domain/models/DraftPick';
+import { DraftOrderEntry } from '../../domain/models/DraftOrderEntry';
+import { Player } from '../../domain/models/Player';
+import { IDraftEventsPublisher } from './IDraftEventsPublisher';
+import { DraftQueueService } from './DraftQueueService';
+import { ValidationException, NotFoundException, ServerException } from '../../domain/exceptions/AuthExceptions';
+
+export class DraftService {
+  constructor(
+    private readonly draftRepository: IDraftRepository,
+    private readonly pool: Pool,
+    private readonly eventsPublisher?: IDraftEventsPublisher,
+    private readonly queueService?: DraftQueueService
+  ) {}
+
+  /**
+   * Start a draft
+   */
+  async startDraft(draftId: number, userId: string): Promise<DraftData> {
+    const draft = await this.draftRepository.findById(draftId);
+    if (!draft) throw new NotFoundException('Draft not found');
+
+    if (draft.status !== 'not_started') {
+      throw new ValidationException('Draft has already been started');
+    }
+
+    // Verify commissioner
+    await this.verifyCommissioner(draft.leagueId, userId);
+
+    const draftOrder = await this.draftRepository.getDraftOrder(draftId);
+    if (draftOrder.length === 0) {
+      throw new ValidationException('Draft order must be set before starting');
+    }
+
+    // Get first picker
+    const firstPicker = draftOrder.find(entry => entry.draftPosition === 1);
+    if (!firstPicker) {
+      throw new ServerException('Could not find first picker');
+    }
+
+    // Calculate pick deadline
+    const pickDeadline = draft.pickTimeSeconds
+      ? new Date(Date.now() + draft.pickTimeSeconds * 1000)
+      : null;
+
+    const updatedDraft = await this.draftRepository.update(draftId, {
+      status: 'in_progress',
+      currentPick: 1,
+      currentRound: 1,
+      currentRosterId: firstPicker.rosterId,
+      pickDeadline,
+      startedAt: new Date()
+    });
+
+    // Send system message
+    await this.sendSystemMessage(
+      draft.leagueId,
+      `Draft has started! ${firstPicker.username || 'Team'} is on the clock.`
+    );
+
+    // Emit WebSocket event
+    if (this.eventsPublisher) {
+      this.eventsPublisher.emitDraftStarted(draft.leagueId, updatedDraft, firstPicker);
+    }
+
+    return updatedDraft;
+  }
+
+  /**
+   * Pause a draft
+   */
+  async pauseDraft(draftId: number, userId: string): Promise<DraftData> {
+    const draft = await this.draftRepository.findById(draftId);
+    if (!draft) throw new NotFoundException('Draft not found');
+
+    if (draft.status !== 'in_progress') {
+      throw new ValidationException('Draft is not in progress');
+    }
+
+    // Verify commissioner
+    await this.verifyCommissioner(draft.leagueId, userId);
+
+    const updatedDraft = await this.draftRepository.update(draftId, {
+      status: 'paused',
+      pickDeadline: null
+    });
+
+    // Send system message
+    await this.sendSystemMessage(draft.leagueId, 'Draft has been paused by the commissioner.');
+
+    // Emit WebSocket event
+    if (this.eventsPublisher) {
+      this.eventsPublisher.emitDraftPaused(draft.leagueId, updatedDraft);
+    }
+
+    return updatedDraft;
+  }
+
+  /**
+   * Resume a draft
+   */
+  async resumeDraft(draftId: number, userId: string): Promise<DraftData> {
+    const draft = await this.draftRepository.findById(draftId);
+    if (!draft) throw new NotFoundException('Draft not found');
+
+    if (draft.status !== 'paused') {
+      throw new ValidationException('Draft is not paused');
+    }
+
+    // Verify commissioner
+    await this.verifyCommissioner(draft.leagueId, userId);
+
+    // Get current picker
+    const draftOrder = await this.draftRepository.getDraftOrder(draftId);
+    const currentPicker = await this.getCurrentPicker(draft, draftOrder);
+    if (!currentPicker) {
+      throw new ServerException('Could not determine current picker');
+    }
+
+    // Calculate new pick deadline
+    const pickDeadline = draft.pickTimeSeconds
+      ? new Date(Date.now() + draft.pickTimeSeconds * 1000)
+      : null;
+
+    const updatedDraft = await this.draftRepository.update(draftId, {
+      status: 'in_progress',
+      pickDeadline
+    });
+
+    // Send system message
+    await this.sendSystemMessage(
+      draft.leagueId,
+      `Draft has resumed! ${currentPicker.username || 'Team'} is on the clock.`
+    );
+
+    // Emit WebSocket event
+    if (this.eventsPublisher) {
+      this.eventsPublisher.emitDraftResumed(draft.leagueId, updatedDraft, currentPicker);
+    }
+
+    return updatedDraft;
+  }
+
+  /**
+   * Make a pick
+   */
+  async makePick(draftId: number, userId: string, playerId: number): Promise<DraftPick> {
+    const draft = await this.draftRepository.findById(draftId);
+    if (!draft) throw new NotFoundException('Draft not found');
+
+    if (draft.status !== 'in_progress') {
+      throw new ValidationException('Draft is not in progress');
+    }
+
+    // Get draft order
+    const draftOrder = await this.draftRepository.getDraftOrder(draftId);
+    const currentPicker = await this.getCurrentPicker(draft, draftOrder);
+
+    if (!currentPicker) {
+      throw new ServerException('Could not determine current picker');
+    }
+
+    // Verify it's the user's turn
+    if (currentPicker.userId !== userId) {
+      throw new ValidationException('It is not your turn to pick');
+    }
+
+    // Verify player is available
+    const isAvailable = await this.draftRepository.isPlayerAvailable(draftId, playerId);
+    if (!isAvailable) {
+      throw new ValidationException('Player has already been drafted');
+    }
+
+    // Calculate pick time
+    const pickTimeSeconds = draft.pickDeadline
+      ? Math.max(0, Math.floor((draft.pickDeadline.getTime() - Date.now()) / 1000))
+      : null;
+
+    // Create pick
+    const pick = await this.draftRepository.createPick({
+      draftId,
+      pickNumber: draft.currentPick!,
+      round: draft.currentRound!,
+      pickInRound: this.getPickInRound(draft, draftOrder),
+      rosterId: currentPicker.rosterId,
+      playerId,
+      isAutoPick: false,
+      pickTimeSeconds
+    });
+
+    // Get player info for system message
+    const player = await this.getPlayerInfo(playerId);
+    const playerName = player ? `${player.fullName} (${player.position})` : `Player #${playerId}`;
+
+    // Send system message
+    await this.sendSystemMessage(
+      draft.leagueId,
+      `${currentPicker.username || 'Team'} selected ${playerName}`
+    );
+
+    // Advance draft
+    const { updatedDraft, nextPicker } = await this.advanceDraft(draft, draftOrder);
+
+    // Emit WebSocket event
+    if (this.eventsPublisher) {
+      this.eventsPublisher.emitPickMade(draft.leagueId, pick, updatedDraft, nextPicker);
+    }
+
+    return pick;
+  }
+
+  /**
+   * Auto-pick for current user (called by cron job)
+   */
+  async autoPickForCurrentUser(draftId: number): Promise<DraftPick | null> {
+    const draft = await this.draftRepository.findById(draftId);
+    if (!draft || draft.status !== 'in_progress') return null;
+
+    const draftOrder = await this.draftRepository.getDraftOrder(draftId);
+    const currentPicker = await this.getCurrentPicker(draft, draftOrder);
+    if (!currentPicker) return null;
+
+    let selectedPlayer: Player | undefined;
+
+    // Try to use queued player first
+    if (this.queueService) {
+      const nextQueued = await this.queueService.getNextQueuedPlayer(draftId, currentPicker.rosterId);
+      if (nextQueued && nextQueued.player) {
+        selectedPlayer = nextQueued.player;
+        console.log(`[Draft Auto-Pick] Using queued player: ${selectedPlayer.fullName} (player.id: ${selectedPlayer.id}, queue.playerId: ${nextQueued.playerId})`);
+      }
+    }
+
+    // Fall back to random player if no queue or queue is empty
+    if (!selectedPlayer) {
+      const playerPool = draft.settings?.player_pool || 'all';
+      const availablePlayers = await this.draftRepository.getAvailablePlayers(draftId, playerPool);
+
+      if (availablePlayers.length === 0) {
+        // No players available - complete draft?
+        return null;
+      }
+
+      // Select random player
+      selectedPlayer = availablePlayers[Math.floor(Math.random() * availablePlayers.length)];
+      console.log(`[Draft Auto-Pick] No queue, selecting random player: ${selectedPlayer.fullName}`);
+    }
+
+    // Create auto-pick
+    const pick = await this.draftRepository.createPick({
+      draftId,
+      pickNumber: draft.currentPick!,
+      round: draft.currentRound!,
+      pickInRound: this.getPickInRound(draft, draftOrder),
+      rosterId: currentPicker.rosterId,
+      playerId: selectedPlayer.id,
+      isAutoPick: true,
+      pickTimeSeconds: 0
+    });
+
+    // Remove player from all queues
+    if (this.queueService) {
+      await this.queueService.removePlayerFromAllQueues(draftId, selectedPlayer.id);
+    }
+
+    // Send system message
+    await this.sendSystemMessage(
+      draft.leagueId,
+      `⏰ ${currentPicker.username || 'Team'} auto-picked ${selectedPlayer.fullName} (${selectedPlayer.position})`
+    );
+
+    // Advance draft
+    const { updatedDraft, nextPicker } = await this.advanceDraft(draft, draftOrder);
+
+    // Emit WebSocket event
+    if (this.eventsPublisher) {
+      this.eventsPublisher.emitAutoPickOccurred(draft.leagueId, pick, updatedDraft, nextPicker);
+    }
+
+    return pick;
+  }
+
+  /**
+   * Get available players with filters
+   */
+  async getAvailablePlayers(draftId: number, filters?: PlayerFilters): Promise<Player[]> {
+    const draft = await this.draftRepository.findById(draftId);
+    if (!draft) throw new NotFoundException('Draft not found');
+
+    const playerPool = draft.settings?.player_pool || 'all';
+    return this.draftRepository.getAvailablePlayers(draftId, playerPool, filters);
+  }
+
+  /**
+   * Get draft picks
+   */
+  async getDraftPicks(draftId: number): Promise<DraftPick[]> {
+    return this.draftRepository.getDraftPicks(draftId);
+  }
+
+  /**
+   * Get draft state (for frontend)
+   */
+  async getDraftState(draftId: number): Promise<any> {
+    const draft = await this.draftRepository.findById(draftId);
+    if (!draft) throw new NotFoundException('Draft not found');
+
+    const draftOrder = await this.draftRepository.getDraftOrder(draftId);
+    const picks = await this.draftRepository.getDraftPicks(draftId);
+    const currentPicker = draft.status === 'in_progress'
+      ? await this.getCurrentPicker(draft, draftOrder)
+      : null;
+
+    return {
+      draft,
+      draftOrder,
+      picks,
+      currentPicker
+    };
+  }
+
+  /**
+   * Advance the draft to the next pick
+   */
+  private async advanceDraft(
+    draft: DraftData,
+    draftOrder: DraftOrderEntry[]
+  ): Promise<{ updatedDraft: DraftData; nextPicker: DraftOrderEntry | null }> {
+    const totalPicks = draftOrder.length * draft.rounds;
+    const nextPickNumber = (draft.currentPick || 0) + 1;
+
+    // Check if draft is complete
+    if (nextPickNumber > totalPicks) {
+      const updatedDraft = await this.draftRepository.update(draft.id, {
+        status: 'completed',
+        currentPick: null,
+        currentRound: null,
+        currentRosterId: null,
+        pickDeadline: null,
+        completedAt: new Date()
+      });
+
+      await this.sendSystemMessage(draft.leagueId, '🎉 Draft completed!');
+
+      if (this.eventsPublisher) {
+        this.eventsPublisher.emitDraftCompleted(draft.leagueId, updatedDraft);
+      }
+
+      return { updatedDraft, nextPicker: null };
+    }
+
+    // Calculate next round and pick
+    const nextRound = Math.ceil(nextPickNumber / draftOrder.length);
+    const nextPicker = this.getPickerForPickNumber(draft, draftOrder, nextPickNumber);
+
+    if (!nextPicker) {
+      throw new ServerException('Could not determine next picker');
+    }
+
+    // Calculate new pick deadline
+    const pickDeadline = draft.pickTimeSeconds
+      ? new Date(Date.now() + draft.pickTimeSeconds * 1000)
+      : null;
+
+    const updatedDraft = await this.draftRepository.update(draft.id, {
+      currentPick: nextPickNumber,
+      currentRound: nextRound,
+      currentRosterId: nextPicker.rosterId,
+      pickDeadline
+    });
+
+    return { updatedDraft, nextPicker };
+  }
+
+  /**
+   * Get current picker
+   */
+  private async getCurrentPicker(
+    draft: DraftData,
+    draftOrder: DraftOrderEntry[]
+  ): Promise<DraftOrderEntry | null> {
+    if (!draft.currentPick) return null;
+    return this.getPickerForPickNumber(draft, draftOrder, draft.currentPick);
+  }
+
+  /**
+   * Get picker for a specific pick number
+   */
+  private getPickerForPickNumber(
+    draft: DraftData,
+    draftOrder: DraftOrderEntry[],
+    pickNumber: number
+  ): DraftOrderEntry | null {
+    const totalRosters = draftOrder.length;
+    const round = Math.ceil(pickNumber / totalRosters);
+    const pickInRound = ((pickNumber - 1) % totalRosters) + 1;
+
+    const isReversed = this.isSnakeRoundReversed(draft, round);
+    const position = isReversed
+      ? totalRosters - pickInRound + 1
+      : pickInRound;
+
+    return draftOrder.find(entry => entry.draftPosition === position) || null;
+  }
+
+  /**
+   * Check if a snake round is reversed
+   */
+  private isSnakeRoundReversed(draft: DraftData, round: number): boolean {
+    if (draft.draftType !== 'snake') return false;
+
+    // Round 3 reversal setting
+    if (draft.thirdRoundReversal && round === 3) return true;
+
+    // Standard snake: even rounds are reversed
+    return round % 2 === 0;
+  }
+
+  /**
+   * Get pick in round number
+   */
+  private getPickInRound(draft: DraftData, draftOrder: DraftOrderEntry[]): number {
+    if (!draft.currentPick) return 1;
+    return ((draft.currentPick - 1) % draftOrder.length) + 1;
+  }
+
+  /**
+   * Check if user is commissioner of a league (public method for controllers)
+   */
+  async isUserCommissioner(leagueId: number, userId: string): Promise<boolean> {
+    const result = await this.pool.query(
+      `SELECT l.settings->>'commissioner_roster_id' as commissioner_roster_id,
+              r.roster_id
+       FROM leagues l
+       INNER JOIN rosters r ON r.league_id = l.id AND r.user_id = $2
+       WHERE l.id = $1`,
+      [leagueId, userId]
+    );
+
+    if (result.rows.length === 0) {
+      return false;
+    }
+
+    const row = result.rows[0];
+    return (
+      row.commissioner_roster_id &&
+      row.roster_id &&
+      row.commissioner_roster_id === row.roster_id.toString()
+    );
+  }
+
+  /**
+   * Check if user has access to a league (public method for controllers)
+   */
+  async userHasLeagueAccess(leagueId: number, userId: string): Promise<boolean> {
+    const result = await this.pool.query(
+      `SELECT 1 FROM rosters WHERE league_id = $1 AND user_id = $2`,
+      [leagueId, userId]
+    );
+    return result.rows.length > 0;
+  }
+
+  /**
+   * Verify user is commissioner (throws if not)
+   */
+  private async verifyCommissioner(leagueId: number, userId: string): Promise<void> {
+    const isCommissioner = await this.isUserCommissioner(leagueId, userId);
+    if (!isCommissioner) {
+      throw new ValidationException('Only the commissioner can perform this action');
+    }
+  }
+
+  /**
+   * Send system message to league chat
+   */
+  private async sendSystemMessage(leagueId: number, message: string): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO league_chat_messages (league_id, user_id, message, message_type)
+       VALUES ($1, NULL, $2, 'system')`,
+      [leagueId, message]
+    );
+  }
+
+  /**
+   * Get player info
+   */
+  private async getPlayerInfo(playerId: number): Promise<Player | null> {
+    const result = await this.pool.query(
+      'SELECT * FROM players WHERE id = $1',
+      [playerId]
+    );
+
+    if (result.rows.length === 0) return null;
+    return Player.fromDatabase(result.rows[0]);
+  }
+
+  /**
+   * Get username by user ID
+   */
+  private async getUsernameById(userId: string): Promise<string> {
+    const result = await this.pool.query(
+      'SELECT username FROM users WHERE id = $1',
+      [userId]
+    );
+
+    return result.rows[0]?.username || 'Commissioner';
+  }
+
+  /**
+   * Map database row to DraftData (transforms snake_case to camelCase)
+   */
+  private mapDraftRow(row: any): DraftData {
+    const settings: any = row.settings || {};
+    const settingsPickDeadline = settings.pick_deadline as string | undefined;
+
+    // Prefer the JSON settings pick_deadline (used by derby), fall back to column
+    const pickDeadline: Date | null = settingsPickDeadline
+      ? new Date(settingsPickDeadline)
+      : row.pick_deadline;
+
+    return {
+      id: row.id,
+      leagueId: row.league_id,
+      draftType: row.draft_type,
+      thirdRoundReversal: row.third_round_reversal,
+      status: row.status,
+      currentPick: row.current_pick,
+      currentRound: row.current_round,
+      currentRosterId: row.current_roster_id,
+      pickTimeSeconds: row.pick_time_seconds,
+      pickDeadline,
+      rounds: row.rounds,
+      totalRosters: row.total_rosters,
+      startedAt: row.started_at,
+      completedAt: row.completed_at,
+      settings: row.settings,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+      commissionerRosterId: row.commissioner_roster_id || null,
+      userRosterId: row.user_roster_id || null,
+    };
+  }
+
+  // ==========================================
+  // Draft CRUD Operations
+  // ==========================================
+
+  /**
+   * Get all drafts for a league
+   */
+  async getLeagueDrafts(leagueId: number, userId: string): Promise<DraftData[]> {
+    // Verify access
+    const hasAccess = await this.userHasLeagueAccess(leagueId, userId);
+    if (!hasAccess) {
+      throw new NotFoundException('League not found or access denied');
+    }
+
+    const result = await this.pool.query(
+      `SELECT d.*,
+              l.total_rosters,
+              (l.settings->>'commissioner_roster_id')::int as commissioner_roster_id,
+              r.roster_id as user_roster_id
+       FROM drafts d
+       INNER JOIN leagues l ON l.id = d.league_id
+       LEFT JOIN rosters r ON r.league_id = l.id AND r.user_id = $2
+       WHERE d.league_id = $1
+       ORDER BY d.created_at DESC`,
+      [leagueId, userId]
+    );
+
+    return result.rows.map(row => this.mapDraftRow(row));
+  }
+
+  /**
+   * Get a specific draft by ID
+   */
+  async getDraftById(leagueId: number, draftId: number, userId: string): Promise<DraftData> {
+    // Verify access
+    const hasAccess = await this.userHasLeagueAccess(leagueId, userId);
+    if (!hasAccess) {
+      throw new NotFoundException('League not found or access denied');
+    }
+
+    const result = await this.pool.query(
+      `SELECT d.*,
+              l.total_rosters,
+              (l.settings->>'commissioner_roster_id')::int as commissioner_roster_id,
+              r.roster_id as user_roster_id
+       FROM drafts d
+       INNER JOIN leagues l ON l.id = d.league_id
+       LEFT JOIN rosters r ON r.league_id = l.id AND r.user_id = $3
+       WHERE d.id = $1 AND d.league_id = $2`,
+      [draftId, leagueId, userId]
+    );
+
+    if (result.rows.length === 0) {
+      throw new NotFoundException('Draft not found');
+    }
+
+    return this.mapDraftRow(result.rows[0]);
+  }
+
+  /**
+   * Create a new draft
+   */
+  async createDraft(
+    leagueId: number,
+    userId: string,
+    params: {
+      draftType: string;
+      thirdRoundReversal?: boolean;
+      rounds: number;
+      pickTimeSeconds: number;
+      playerPool?: string;
+      draftOrder?: string;
+      timerMode?: string;
+      derbyStartTime?: string;
+      autoStartDerby?: boolean;
+      derbyTimerSeconds?: number;
+      derbyOnTimeout?: string;
+    }
+  ): Promise<DraftData> {
+    // Verify commissioner
+    await this.verifyCommissioner(leagueId, userId);
+
+    // Build settings object
+    const settings: any = {
+      player_pool: params.playerPool || 'all',
+      draft_order: params.draftOrder || 'randomize',
+      timer_mode: params.timerMode || 'per_pick',
+    };
+
+    // Add derby-specific fields if provided
+    if (params.derbyStartTime) settings.derby_start_time = params.derbyStartTime;
+    if (params.autoStartDerby !== undefined) settings.auto_start_derby = params.autoStartDerby;
+    if (params.derbyTimerSeconds !== undefined) settings.derby_timer_seconds = params.derbyTimerSeconds;
+    if (params.derbyOnTimeout !== undefined) settings.derby_on_timeout = params.derbyOnTimeout;
+
+    const insertResult = await this.pool.query(
+      `INSERT INTO drafts (
+        league_id, draft_type, third_round_reversal, rounds,
+        pick_time_seconds, settings, status, current_roster_id
+      ) VALUES ($1, $2, $3, $4, $5, $6, 'not_started', NULL)
+      RETURNING *`,
+      [
+        leagueId,
+        params.draftType,
+        params.thirdRoundReversal || false,
+        params.rounds,
+        params.pickTimeSeconds,
+        JSON.stringify(settings),
+      ]
+    );
+
+    // Fetch the draft with league info to get total_rosters
+    const result = await this.pool.query(
+      `SELECT d.*, l.total_rosters
+       FROM drafts d
+       INNER JOIN leagues l ON l.id = d.league_id
+       WHERE d.id = $1`,
+      [insertResult.rows[0].id]
+    );
+
+    return this.mapDraftRow(result.rows[0]);
+  }
+
+  /**
+   * Delete a draft
+   */
+  async deleteDraft(leagueId: number, draftId: number, userId: string): Promise<void> {
+    // Verify commissioner
+    await this.verifyCommissioner(leagueId, userId);
+
+    // Check if draft exists
+    const checkResult = await this.pool.query(
+      'SELECT id FROM drafts WHERE id = $1 AND league_id = $2',
+      [draftId, leagueId]
+    );
+
+    if (checkResult.rows.length === 0) {
+      throw new NotFoundException('Draft not found');
+    }
+
+    // Delete the draft (cascade will handle related records)
+    await this.pool.query('DELETE FROM drafts WHERE id = $1', [draftId]);
+  }
+
+  /**
+   * Update a draft
+   */
+  async updateDraft(
+    leagueId: number,
+    draftId: number,
+    userId: string,
+    params: {
+      draftType?: string;
+      thirdRoundReversal?: boolean;
+      rounds?: number;
+      pickTimeSeconds?: number;
+      playerPool?: string;
+      draftOrder?: string;
+      timerMode?: string;
+      derbyStartTime?: string;
+      autoStartDerby?: boolean;
+      derbyTimerSeconds?: number;
+      derbyOnTimeout?: string;
+    }
+  ): Promise<DraftData> {
+    // Verify commissioner
+    await this.verifyCommissioner(leagueId, userId);
+
+    // Get existing draft and settings
+    const checkResult = await this.pool.query(
+      'SELECT settings FROM drafts WHERE id = $1 AND league_id = $2',
+      [draftId, leagueId]
+    );
+
+    if (checkResult.rows.length === 0) {
+      throw new NotFoundException('Draft not found');
+    }
+
+    // Merge with existing settings to preserve fields like derby_status, current_picker_index, etc.
+    const existingSettings = checkResult.rows[0].settings || {};
+    const settings: any = {
+      ...existingSettings,
+      player_pool:
+        params.playerPool !== undefined
+          ? params.playerPool
+          : existingSettings.player_pool || 'all',
+      draft_order:
+        params.draftOrder !== undefined
+          ? params.draftOrder
+          : existingSettings.draft_order || 'randomize',
+      timer_mode:
+        params.timerMode !== undefined
+          ? params.timerMode
+          : existingSettings.timer_mode || 'per_pick',
+    };
+
+    // Add derby-specific fields if provided
+    if (params.derbyStartTime !== undefined) {
+      settings.derby_start_time = params.derbyStartTime;
+    }
+    if (params.autoStartDerby !== undefined) {
+      settings.auto_start_derby = params.autoStartDerby;
+    }
+    if (params.derbyTimerSeconds !== undefined) {
+      settings.derby_timer_seconds = params.derbyTimerSeconds;
+
+      // If derby is in progress and timer was updated, recalculate pick_deadline
+      if (settings.derby_status === 'in_progress' && settings.pick_deadline) {
+        const now = new Date();
+        settings.pick_deadline = new Date(now.getTime() + params.derbyTimerSeconds * 1000);
+      }
+    }
+    if (params.derbyOnTimeout !== undefined) {
+      settings.derby_on_timeout = params.derbyOnTimeout;
+    }
+
+    await this.pool.query(
+      `UPDATE drafts SET
+        draft_type = COALESCE($1, draft_type),
+        third_round_reversal = COALESCE($2, third_round_reversal),
+        rounds = COALESCE($3, rounds),
+        pick_time_seconds = COALESCE($4, pick_time_seconds),
+        settings = COALESCE($5, settings),
+        pick_deadline = $8,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = $6 AND league_id = $7`,
+      [
+        params.draftType,
+        params.thirdRoundReversal,
+        params.rounds,
+        params.pickTimeSeconds,
+        JSON.stringify(settings),
+        draftId,
+        leagueId,
+        settings.pick_deadline || null,
+      ]
+    );
+
+    // Fetch the updated draft with league info to get total_rosters
+    const result = await this.pool.query(
+      `SELECT d.*, l.total_rosters
+       FROM drafts d
+       INNER JOIN leagues l ON l.id = d.league_id
+       WHERE d.id = $1`,
+      [draftId]
+    );
+
+    return this.mapDraftRow(result.rows[0]);
+  }
+
+  /**
+   * Get draft order for a draft
+   */
+  async getDraftOrderForDraft(leagueId: number, draftId: number, userId: string): Promise<DraftOrderEntry[]> {
+    // Verify access
+    const hasAccess = await this.userHasLeagueAccess(leagueId, userId);
+    if (!hasAccess) {
+      throw new NotFoundException('League not found or access denied');
+    }
+
+    return this.draftRepository.getDraftOrder(draftId);
+  }
+
+  /**
+   * Start a derby draft
+   */
+  async startDerby(leagueId: number, draftId: number, userId: string): Promise<DraftData> {
+    // Verify commissioner
+    await this.verifyCommissioner(leagueId, userId);
+
+    // Check if draft exists and is a derby draft
+    const draftResult = await this.pool.query(
+      'SELECT id, draft_type, settings FROM drafts WHERE id = $1 AND league_id = $2',
+      [draftId, leagueId]
+    );
+
+    if (draftResult.rows.length === 0) {
+      throw new NotFoundException('Draft not found');
+    }
+
+    const draft = draftResult.rows[0];
+    const settings = draft.settings || {};
+
+    if (settings.draft_order !== 'derby') {
+      throw new ValidationException(
+        "This endpoint is only for derby drafts (draft_order must be 'derby')"
+      );
+    }
+
+    // Check if draft order has been randomized
+    const orderCheck = await this.pool.query(
+      'SELECT COUNT(*) as count FROM draft_order WHERE draft_id = $1',
+      [draftId]
+    );
+
+    if (parseInt(orderCheck.rows[0].count) === 0) {
+      throw new ValidationException('Derby order must be randomized before starting');
+    }
+
+    // Use derby timer seconds from settings (not pick_time_seconds)
+    const derbyTimerSeconds = settings.derby_timer_seconds || 300; // Default 5 minutes
+
+    // Set derby start time to now
+    const derbyStartTime = new Date();
+    settings.derby_start_time = derbyStartTime.toISOString();
+    settings.derby_status = 'in_progress';
+    settings.current_picker_index = 0; // First person in derby order picks first
+    settings.pick_deadline = new Date(Date.now() + derbyTimerSeconds * 1000).toISOString();
+
+    // Update the draft with derby start time and status
+    await this.pool.query(
+      `UPDATE drafts
+       SET settings = $1,
+           updated_at = CURRENT_TIMESTAMP,
+           pick_deadline = $2
+       WHERE id = $3`,
+      [JSON.stringify(settings), settings.pick_deadline, draftId]
+    );
+
+    // Get username for system message
+    const username = await this.getUsernameById(userId);
+
+    // Send system message
+    await this.sendSystemMessage(
+      leagueId,
+      `${username} started the derby! Users can now select their draft positions.`
+    );
+
+    // Fetch the updated draft with league info to get total_rosters
+    const result = await this.pool.query(
+      `SELECT d.*, l.total_rosters
+       FROM drafts d
+       INNER JOIN leagues l ON l.id = d.league_id
+       WHERE d.id = $1`,
+      [draftId]
+    );
+
+    return this.mapDraftRow(result.rows[0]);
+  }
+
+  /**
+   * Pick a draft slot in derby
+   */
+  async pickDerbySlot(leagueId: number, draftId: number, userId: string, slotNumber: number): Promise<DraftData> {
+    // Get draft settings and check it's a derby in progress
+    const draftResult = await this.pool.query(
+      'SELECT id, draft_type, settings, pick_time_seconds FROM drafts WHERE id = $1 AND league_id = $2',
+      [draftId, leagueId]
+    );
+
+    if (draftResult.rows.length === 0) {
+      throw new NotFoundException('Draft not found');
+    }
+
+    const draft = draftResult.rows[0];
+    const settings = draft.settings || {};
+
+    if (settings.draft_order !== 'derby') {
+      throw new ValidationException("This endpoint is only for derby drafts (draft_order must be 'derby')");
+    }
+
+    if (settings.derby_status !== 'in_progress') {
+      throw new ValidationException('Derby is not in progress');
+    }
+
+    // Get draft order to find current picker
+    // Order by id to preserve the original derby picking order (not draft_position which changes as people pick)
+    const orderResult = await this.pool.query(
+      `SELECT d_order.id, d_order.roster_id, d_order.draft_position, r.user_id
+       FROM draft_order d_order
+       INNER JOIN rosters r ON r.id = d_order.roster_id
+       WHERE d_order.draft_id = $1
+       ORDER BY d_order.id`,
+      [draftId]
+    );
+
+    if (orderResult.rows.length === 0) {
+      throw new ValidationException('No draft order found');
+    }
+
+    const currentPickerIndex = settings.current_picker_index || 0;
+    const currentPicker = orderResult.rows[currentPickerIndex];
+
+    // Verify it's this user's turn
+    if (currentPicker.user_id !== userId) {
+      throw new ValidationException("It's not your turn to pick");
+    }
+
+    // Validate slot number
+    if (slotNumber < 1 || slotNumber > orderResult.rows.length) {
+      throw new ValidationException(`Slot number must be between 1 and ${orderResult.rows.length}`);
+    }
+
+    // Check if slot is already taken
+    const slotCheck = await this.pool.query(
+      `SELECT id FROM draft_order
+       WHERE draft_id = $1 AND draft_position = $2 AND id != $3`,
+      [draftId, slotNumber, currentPicker.id]
+    );
+
+    if (slotCheck.rows.length > 0) {
+      throw new ValidationException('This slot is already taken');
+    }
+
+    // Update the draft order with the selected slot
+    await this.pool.query(
+      `UPDATE draft_order SET draft_position = $1 WHERE id = $2`,
+      [slotNumber, currentPicker.id]
+    );
+
+    // Move to next picker
+    const nextPickerIndex = currentPickerIndex + 1;
+
+    if (nextPickerIndex < orderResult.rows.length) {
+      // More pickers to go
+      settings.current_picker_index = nextPickerIndex;
+      // Use derby timer seconds from settings (not pick_time_seconds)
+      const derbyTimerSeconds = settings.derby_timer_seconds || 300;
+      settings.pick_deadline = new Date(Date.now() + derbyTimerSeconds * 1000).toISOString();
+    } else {
+      // Derby complete
+      settings.derby_status = 'completed';
+      delete settings.current_picker_index;
+      delete settings.pick_deadline;
+    }
+
+    // Update draft settings and pick_deadline column
+    await this.pool.query(
+      `UPDATE drafts SET settings = $1, pick_deadline = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3`,
+      [JSON.stringify(settings), settings.pick_deadline || null, draftId]
+    );
+
+    // Get username for system message
+    const username = await this.getUsernameById(userId);
+
+    // Send system message
+    await this.sendSystemMessage(leagueId, `${username} selected slot ${slotNumber}`);
+
+    // Fetch the updated draft with league info to get total_rosters
+    const result = await this.pool.query(
+      `SELECT d.*, l.total_rosters
+       FROM drafts d
+       INNER JOIN leagues l ON l.id = d.league_id
+       WHERE d.id = $1`,
+      [draftId]
+    );
+
+    return this.mapDraftRow(result.rows[0]);
+  }
+
+  /**
+   * Pause a derby draft
+   */
+  async pauseDerby(leagueId: number, draftId: number, userId: string): Promise<DraftData> {
+    // Verify commissioner
+    await this.verifyCommissioner(leagueId, userId);
+
+    // Get draft settings
+    const draftResult = await this.pool.query(
+      'SELECT * FROM drafts WHERE id = $1 AND league_id = $2',
+      [draftId, leagueId]
+    );
+
+    if (draftResult.rows.length === 0) {
+      throw new NotFoundException('Draft not found');
+    }
+
+    const draft = draftResult.rows[0];
+    const settings = draft.settings || {};
+
+    if (settings.draft_order !== 'derby') {
+      throw new ValidationException('This endpoint is only for derby drafts');
+    }
+
+    if (settings.derby_status !== 'in_progress') {
+      throw new ValidationException('Derby is not in progress');
+    }
+
+    // Pause the derby
+    settings.derby_status = 'paused';
+    delete settings.pick_deadline; // Remove the deadline when paused
+
+    await this.pool.query(
+      `UPDATE drafts SET settings = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
+      [JSON.stringify(settings), draftId]
+    );
+
+    // Get username for system message
+    const username = await this.getUsernameById(userId);
+
+    // Send system message
+    await this.sendSystemMessage(leagueId, `${username} paused the derby`);
+
+    // Fetch the updated draft with league info to get total_rosters
+    const result = await this.pool.query(
+      `SELECT d.*, l.total_rosters
+       FROM drafts d
+       INNER JOIN leagues l ON l.id = d.league_id
+       WHERE d.id = $1`,
+      [draftId]
+    );
+
+    return this.mapDraftRow(result.rows[0]);
+  }
+
+  /**
+   * Resume a derby draft
+   */
+  async resumeDerby(leagueId: number, draftId: number, userId: string): Promise<DraftData> {
+    // Verify commissioner
+    await this.verifyCommissioner(leagueId, userId);
+
+    // Get draft settings and pick time
+    const draftResult = await this.pool.query(
+      'SELECT * FROM drafts WHERE id = $1 AND league_id = $2',
+      [draftId, leagueId]
+    );
+
+    if (draftResult.rows.length === 0) {
+      throw new NotFoundException('Draft not found');
+    }
+
+    const draft = draftResult.rows[0];
+    const settings = draft.settings || {};
+
+    if (settings.draft_order !== 'derby') {
+      throw new ValidationException('This endpoint is only for derby drafts');
+    }
+
+    if (settings.derby_status !== 'paused') {
+      throw new ValidationException('Derby is not paused');
+    }
+
+    // Resume the derby
+    settings.derby_status = 'in_progress';
+    // Use derby_timer_seconds (default to 300 seconds if not set)
+    const derbyTimerSeconds = settings.derby_timer_seconds || 300;
+    settings.pick_deadline = new Date(Date.now() + derbyTimerSeconds * 1000).toISOString();
+
+    await this.pool.query(
+      `UPDATE drafts SET settings = $1, pick_deadline = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3`,
+      [JSON.stringify(settings), settings.pick_deadline, draftId]
+    );
+
+    // Get username for system message
+    const username = await this.getUsernameById(userId);
+
+    // Send system message
+    await this.sendSystemMessage(leagueId, `${username} resumed the derby`);
+
+    // Fetch the updated draft with league info to get total_rosters
+    const result = await this.pool.query(
+      `SELECT d.*, l.total_rosters
+       FROM drafts d
+       INNER JOIN leagues l ON l.id = d.league_id
+       WHERE d.id = $1`,
+      [draftId]
+    );
+
+    return this.mapDraftRow(result.rows[0]);
+  }
+
+  /**
+   * Randomize draft order
+   */
+  async randomizeDraftOrder(leagueId: number, draftId: number, userId: string): Promise<DraftOrderEntry[]> {
+    // Verify commissioner
+    await this.verifyCommissioner(leagueId, userId);
+
+    // Check if draft exists and get settings
+    const draftResult = await this.pool.query(
+      'SELECT id, settings FROM drafts WHERE id = $1 AND league_id = $2',
+      [draftId, leagueId]
+    );
+
+    if (draftResult.rows.length === 0) {
+      throw new NotFoundException('Draft not found');
+    }
+
+    const settings = draftResult.rows[0].settings || {};
+    const isDerby = settings.draft_order === 'derby';
+
+    // Get league info to check total_rosters
+    const leagueResult = await this.pool.query(
+      'SELECT total_rosters FROM leagues WHERE id = $1',
+      [leagueId]
+    );
+
+    if (leagueResult.rows.length === 0) {
+      throw new NotFoundException('League not found');
+    }
+
+    const totalRosters = leagueResult.rows[0].total_rosters;
+
+    // Get all existing rosters for this league (only up to total_rosters)
+    const rostersResult = await this.pool.query(
+      `SELECT id, roster_id FROM rosters
+       WHERE league_id = $1 AND roster_id <= $2
+       ORDER BY roster_id`,
+      [leagueId, totalRosters]
+    );
+
+    // Create missing rosters if needed (for teams without managers in derby drafts)
+    const existingRosterIds = new Set(rostersResult.rows.map((r) => r.roster_id));
+    const missingRosterIds = [];
+
+    for (let i = 1; i <= totalRosters; i++) {
+      if (!existingRosterIds.has(i)) {
+        missingRosterIds.push(i);
+      }
+    }
+
+    // Insert missing rosters with NULL user_id
+    for (const rosterId of missingRosterIds) {
+      await this.pool.query(
+        `INSERT INTO rosters (league_id, roster_id)
+         VALUES ($1, $2)`,
+        [leagueId, rosterId]
+      );
+    }
+
+    // Re-fetch all rosters after creating missing ones (only up to total_rosters)
+    const allRostersResult = await this.pool.query(
+      `SELECT id, roster_id FROM rosters
+       WHERE league_id = $1 AND roster_id <= $2
+       ORDER BY roster_id`,
+      [leagueId, totalRosters]
+    );
+
+    if (allRostersResult.rows.length === 0) {
+      throw new ValidationException('No rosters found in this league');
+    }
+
+    // Delete existing draft order if any
+    await this.pool.query('DELETE FROM draft_order WHERE draft_id = $1', [draftId]);
+
+    // Shuffle the rosters array (Fisher-Yates shuffle)
+    const rosters = [...allRostersResult.rows];
+    for (let i = rosters.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [rosters[i], rosters[j]] = [rosters[j], rosters[i]];
+    }
+
+    // Insert randomized draft order
+    // For derby drafts, set draft_position to NULL initially (users will pick their slots)
+    // For regular drafts, assign sequential positions
+    const insertPromises = rosters.map((roster, index) => {
+      return this.pool.query(
+        `INSERT INTO draft_order (draft_id, roster_id, draft_position)
+         VALUES ($1, $2, $3)`,
+        [draftId, roster.id, isDerby ? null : index + 1]
+      );
+    });
+
+    await Promise.all(insertPromises);
+
+    // Fetch and return the new draft order with roster details
+    const orderResult = await this.pool.query(
+      `SELECT
+        d_order.id,
+        d_order.draft_id,
+        d_order.roster_id,
+        d_order.draft_position,
+        r.user_id,
+        COALESCE(u.username, 'Team ' || r.roster_id) as username,
+        NULL as team_name
+       FROM draft_order d_order
+       INNER JOIN rosters r ON r.id = d_order.roster_id
+       LEFT JOIN users u ON u.id = r.user_id
+       WHERE d_order.draft_id = $1
+       ORDER BY ${isDerby ? 'd_order.id' : 'd_order.draft_position'}`,
+      [draftId]
+    );
+
+    // Send system message to league chat
+    const orderSummary = orderResult.rows
+      .map((item, index) => `${index + 1}. ${item.username}`)
+      .join('\n');
+
+    await this.sendSystemMessage(
+      leagueId,
+      `Draft order has been randomized!\n\n${orderSummary}`
+    );
+
+    // Map to DraftOrderEntry objects
+    return orderResult.rows.map((row) => DraftOrderEntry.fromDatabase(row));
+  }
+}

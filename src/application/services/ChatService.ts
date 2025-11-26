@@ -1,0 +1,178 @@
+import { Pool } from 'pg';
+import { IChatEventsPublisher } from './IChatEventsPublisher';
+import {
+  ChatMessage,
+  Conversation,
+  DirectMessage,
+} from '../../domain/models/Chat';
+import { ILeagueChatRepository } from '../../domain/repositories/ILeagueChatRepository';
+import { IDirectMessageRepository } from '../../domain/repositories/IDirectMessageRepository';
+
+/**
+ * ChatService
+ * Handles all chat operations for both league chat and direct messages
+ */
+export class ChatService {
+  constructor(
+    private readonly pool: Pool,
+    private readonly eventsPublisher: IChatEventsPublisher,
+    private readonly leagueChatRepository: ILeagueChatRepository,
+    private readonly directMessageRepository: IDirectMessageRepository,
+  ) {}
+
+  /**
+   * Get league chat messages
+   */
+  async getLeagueChatMessages(
+    leagueId: number,
+    limit: number = 100
+  ): Promise<ChatMessage[]> {
+    const messages = await this.leagueChatRepository.getLeagueChatMessages(
+      leagueId,
+      limit
+    );
+    // Reverse to get chronological order (oldest first)
+    return messages.reverse();
+  }
+
+  /**
+   * Send a league chat message
+   */
+  async sendLeagueChatMessage(
+    leagueId: number,
+    userId: string,
+    message: string,
+    messageType: string = 'chat',
+    metadata: Record<string, any> = {}
+  ): Promise<ChatMessage> {
+    const chatMessage = await this.leagueChatRepository.insertUserMessage(
+      leagueId,
+      userId,
+      message,
+      messageType,
+      metadata
+    );
+
+    // Emit via events publisher
+    try {
+      this.eventsPublisher.emitLeagueMessage(leagueId, chatMessage);
+      console.log('[ChatService] Successfully emitted chat message');
+    } catch (err) {
+      console.error('[ChatService] Failed to emit chat message:', err);
+    }
+
+    return chatMessage;
+  }
+
+  /**
+   * Send a system message to league chat
+   * Used for automated messages (league created, user joined, etc.)
+   */
+  async sendSystemMessage(
+    leagueId: number,
+    message: string,
+    metadata: Record<string, any> = {}
+  ): Promise<void> {
+    try {
+      const systemMessage = await this.leagueChatRepository.insertSystemMessage(
+        leagueId,
+        message,
+        metadata
+      );
+
+      console.log(
+        '[ChatService] Emitting system message to league',
+        leagueId,
+        ':',
+        message
+      );
+
+      try {
+        this.eventsPublisher.emitLeagueMessage(leagueId, systemMessage);
+        console.log('[ChatService] Successfully emitted system message');
+      } catch (err) {
+        console.error('[ChatService] Failed to emit system message:', err);
+      }
+    } catch (error) {
+      // Log error but don't throw - system messages shouldn't break the main flow
+      console.error(
+        `[ChatService] Failed to send system message to league ${leagueId}:`,
+        error
+      );
+    }
+  }
+
+  /**
+   * Get all conversations for a user
+   */
+  async getConversations(userId: string): Promise<Conversation[]> {
+    return this.directMessageRepository.getConversations(userId);
+  }
+
+  /**
+   * Get direct messages between two users
+   */
+  async getDirectMessages(
+    userId: string,
+    otherUserId: string,
+    limit: number = 100
+  ): Promise<DirectMessage[]> {
+    return this.directMessageRepository.getConversationMessages(
+      userId,
+      otherUserId,
+      limit
+    );
+  }
+
+  /**
+   * Send a direct message
+   */
+  async sendDirectMessage(
+    senderId: string,
+    receiverId: string,
+    message: string,
+    metadata: Record<string, any> = {}
+  ): Promise<DirectMessage> {
+    const directMessage = await this.directMessageRepository.insertDirectMessage(
+      senderId,
+      receiverId,
+      message,
+      metadata
+    );
+
+    // Emit via events publisher
+    try {
+      const conversationId = [senderId, receiverId].sort().join('_');
+      this.eventsPublisher.emitDirectMessage(conversationId, directMessage);
+    } catch (err) {
+      console.error('[ChatService] Failed to emit direct message:', err);
+    }
+
+    return directMessage;
+  }
+
+  /**
+   * Check if user has access to a league
+   */
+  async userHasLeagueAccess(
+    userId: string,
+    leagueId: number
+  ): Promise<boolean> {
+    const result = await this.pool.query(
+      'SELECT id FROM rosters WHERE league_id = $1 AND user_id = $2',
+      [leagueId, userId]
+    );
+    return result.rows.length > 0;
+  }
+
+  /**
+   * Check if user exists
+   */
+  async userExists(userId: string): Promise<boolean> {
+    const result = await this.pool.query(
+      'SELECT id FROM users WHERE id = $1',
+      [userId]
+    );
+    return result.rows.length > 0;
+  }
+}
