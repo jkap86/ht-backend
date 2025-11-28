@@ -26,9 +26,8 @@ pool.on('acquire', (client) => {
 });
 
 pool.on('error', (err, client) => {
-  logError('Unexpected database error on idle client', {
-    error: err.message,
-    stack: err.stack,
+  logError(err, {
+    context: 'Unexpected database error on idle client'
   });
 });
 
@@ -42,12 +41,12 @@ pool.on('remove', (client) => {
 if (performanceConfig.logQueries) {
   const originalQuery = pool.query.bind(pool);
 
-  pool.query = async function (...args: any[]) {
+  (pool as any).query = async function (...args: any[]): Promise<any> {
     const startTime = Date.now();
     const query = typeof args[0] === 'string' ? args[0] : args[0]?.text;
 
     try {
-      const result = await originalQuery(...args);
+      const result = await (originalQuery as any)(...args);
       const duration = Date.now() - startTime;
 
       // Log slow queries
@@ -63,10 +62,10 @@ if (performanceConfig.logQueries) {
       return result;
     } catch (error) {
       const duration = Date.now() - startTime;
-      logError('Database query failed', {
+      const err = error instanceof Error ? error : new Error('Unknown database error');
+      logError(err, {
         query: query?.substring(0, 500),
         duration_ms: duration,
-        error: error instanceof Error ? error.message : 'Unknown error',
       });
       throw error;
     }
@@ -99,7 +98,7 @@ export function startPoolMonitoring(intervalMs: number = 60000) {
 
     // Alert if utilization is consistently high
     if (stats.utilizationPercent > 90) {
-      logError('Critical database pool utilization', {
+      logError(new Error('Critical database pool utilization'), {
         utilizationPercent: stats.utilizationPercent,
         totalCount: stats.totalCount,
         recommendation: 'Immediate attention required - pool near capacity',
@@ -121,9 +120,8 @@ export async function checkDatabaseHealth(): Promise<boolean> {
     const result = await pool.query('SELECT 1 as health_check');
     return result.rows[0].health_check === 1;
   } catch (error) {
-    logError('Database health check failed', {
-      error: error instanceof Error ? error.message : 'Unknown error',
-    });
+    const err = error instanceof Error ? error : new Error('Unknown error');
+    logError(err, { context: 'Database health check failed' });
     return false;
   }
 }
@@ -135,9 +133,8 @@ export async function closePool(): Promise<void> {
     await pool.end();
     logInfo('Database pool closed successfully');
   } catch (error) {
-    logError('Error closing database pool', {
-      error: error instanceof Error ? error.message : 'Unknown error',
-    });
+    const err = error instanceof Error ? error : new Error('Unknown error');
+    logError(err, { context: 'Error closing database pool' });
     throw error;
   }
 }

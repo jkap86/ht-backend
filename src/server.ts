@@ -16,14 +16,20 @@ import { syncPlayersFromSleeper } from "./app/runtime/jobs/player-sync.service";
 import { swaggerSpec } from "./config/swagger.config";
 import logger, { logInfo, logError, logWarn } from "./infrastructure/logger/Logger";
 
+// Initialize DI Container before loading routes
+Container.initialize(pool);
+
+const app = express();
+
 // Initialize Sentry for error monitoring (only in production)
 if (env.NODE_ENV === 'production' && process.env.SENTRY_DSN) {
   Sentry.init({
     dsn: process.env.SENTRY_DSN,
     environment: env.NODE_ENV,
     integrations: [
-      new Sentry.Integrations.Http({ tracing: true }),
-      new Sentry.Integrations.Express({ app: express() }),
+      // Sentry v8 uses different integration syntax
+      Sentry.httpIntegration(),
+      Sentry.expressIntegration(),
     ],
     tracesSampleRate: 0.1, // 10% of requests will be traced
     beforeSend(event) {
@@ -38,15 +44,7 @@ if (env.NODE_ENV === 'production' && process.env.SENTRY_DSN) {
   logInfo('Sentry error monitoring initialized');
 }
 
-// Initialize DI Container before loading routes
-Container.initialize(pool);
-
-const app = express();
-
-// Sentry request handler (must be first)
-if (env.NODE_ENV === 'production' && process.env.SENTRY_DSN) {
-  app.use(Sentry.Handlers.requestHandler());
-}
+// No request handler needed for Sentry v8 - it's handled by the integration
 
 // CORS configuration
 const corsOptions: cors.CorsOptions = {
@@ -104,9 +102,9 @@ if (env.NODE_ENV !== 'production') {
 const router = require("./app/routes").default;
 app.use("/api", router);
 
-// Sentry error handler (must be before any other error middleware)
+// Sentry error handler for v8
 if (env.NODE_ENV === 'production' && process.env.SENTRY_DSN) {
-  app.use(Sentry.Handlers.errorHandler());
+  app.use(Sentry.expressErrorHandler());
 }
 
 // Global error handler (must be last middleware)
@@ -173,7 +171,7 @@ const gracefulShutdown = () => {
 
   // Force shutdown after 10 seconds
   setTimeout(() => {
-    logError('Forced shutdown after timeout');
+    logError(new Error('Forced shutdown after timeout'));
     process.exit(1);
   }, 10000);
 };
@@ -183,14 +181,13 @@ process.on('SIGTERM', gracefulShutdown);
 
 // Handle uncaught exceptions
 process.on('uncaughtException', (error) => {
-  logError('Uncaught Exception:', { error: error.message, stack: error.stack });
+  logError(error, { context: 'Uncaught Exception' });
   Sentry.captureException(error);
   gracefulShutdown();
 });
 
 process.on('unhandledRejection', (reason, promise) => {
-  logError('Unhandled Rejection:', { reason, promise });
-  if (reason instanceof Error) {
-    Sentry.captureException(reason);
-  }
+  const error = reason instanceof Error ? reason : new Error(String(reason));
+  logError(error, { context: 'Unhandled Rejection', promise });
+  Sentry.captureException(error);
 });

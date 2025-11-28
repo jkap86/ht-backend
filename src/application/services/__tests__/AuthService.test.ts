@@ -24,6 +24,8 @@ describe('AuthService', () => {
       findByUsername: jest.fn(),
       usernameExists: jest.fn(),
       searchByUsername: jest.fn(),
+      update: jest.fn(),
+      delete: jest.fn(),
     } as jest.Mocked<IUserRepository>;
 
     // Create service with mock repository
@@ -51,8 +53,6 @@ describe('AuthService', () => {
         'user-123',
         username,
         hashedPassword,
-        null,
-        null,
         new Date(),
         new Date()
       );
@@ -134,8 +134,6 @@ describe('AuthService', () => {
         'user-123',
         username,
         hashedPassword,
-        null,
-        null,
         new Date(),
         new Date()
       );
@@ -170,8 +168,6 @@ describe('AuthService', () => {
         'user-123',
         username,
         hashedPassword,
-        null,
-        null,
         new Date(),
         new Date()
       );
@@ -193,8 +189,6 @@ describe('AuthService', () => {
         userId,
         username,
         'hashedPassword',
-        null,
-        null,
         new Date(),
         new Date()
       );
@@ -230,8 +224,6 @@ describe('AuthService', () => {
         userId,
         username,
         'hashedPassword',
-        null,
-        null,
         new Date(),
         new Date()
       );
@@ -317,8 +309,8 @@ describe('AuthService', () => {
       const currentUserId = 'current-user';
 
       const mockUsers = [
-        new User('user-1', 'testuser1', 'hash', null, null, new Date(), new Date()),
-        new User('user-2', 'testuser2', 'hash', null, null, new Date(), new Date()),
+        new User('user-1', 'testuser1', 'hash', new Date(), new Date()),
+        new User('user-2', 'testuser2', 'hash', new Date(), new Date()),
       ];
 
       mockUserRepository.searchByUsername.mockResolvedValue(mockUsers);
@@ -354,8 +346,6 @@ describe('AuthService', () => {
         'user-123',
         username,
         hashedPassword,
-        null,
-        null,
         new Date(),
         new Date()
       );

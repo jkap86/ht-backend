@@ -3,7 +3,7 @@ import { JSDOM } from 'jsdom';
 
 // Create a window object for DOMPurify to use
 const window = new JSDOM('').window;
-const purify = DOMPurify(window as unknown as Window);
+const purify = DOMPurify(window as any);
 
 /**
  * Sanitize user input to prevent XSS attacks
