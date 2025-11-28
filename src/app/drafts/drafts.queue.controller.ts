@@ -60,9 +60,9 @@ export const addToQueue = async (
     const leagueId = parseInt(req.params.leagueId, 10);
     const draftId = parseInt(req.params.draftId, 10);
     const userId = req.user?.userId;
-    const { playerId } = req.body;
+    const { player_id } = req.body;
 
-    if (isNaN(leagueId) || isNaN(draftId) || !userId || !playerId) {
+    if (isNaN(leagueId) || isNaN(draftId) || !userId || !player_id) {
       throw new ValidationError("Invalid parameters");
     }
 
@@ -77,7 +77,7 @@ export const addToQueue = async (
     const rosterId = roster.id;
 
     const queueService = Container.getInstance().getDraftQueueService();
-    const queueEntry = await queueService.addToQueue(draftId, rosterId, playerId);
+    const queueEntry = await queueService.addToQueue(draftId, rosterId, player_id);
 
     return res.status(201).json(queueEntry);
   } catch (error) {
