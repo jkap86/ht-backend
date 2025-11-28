@@ -44,6 +44,59 @@ export class AuthController {
    * Register a new user
    * POST /api/auth/register
    * Returns: AuthResponse with user, token, refreshToken
+   *
+   * @swagger
+   * /auth/register:
+   *   post:
+   *     summary: Register a new user
+   *     tags: [Authentication]
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             required:
+   *               - username
+   *               - password
+   *             properties:
+   *               username:
+   *                 type: string
+   *                 minLength: 3
+   *                 maxLength: 20
+   *                 pattern: '^[a-zA-Z0-9_]+$'
+   *                 description: Username (3-20 characters, alphanumeric and underscore only)
+   *                 example: john_doe
+   *               password:
+   *                 type: string
+   *                 minLength: 6
+   *                 description: Password (minimum 6 characters)
+   *                 example: SecurePassword123!
+   *     responses:
+   *       201:
+   *         description: User successfully registered
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/AuthResult'
+   *       400:
+   *         description: Invalid input (validation error)
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/Error'
+   *       409:
+   *         description: Username already exists
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/Error'
+   *       429:
+   *         description: Too many registration attempts (rate limited)
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/Error'
    */
   register = async (
     req: Request,
@@ -71,6 +124,49 @@ export class AuthController {
    * Login user
    * POST /api/auth/login
    * Returns: AuthResponse with user, token, refreshToken
+   *
+   * @swagger
+   * /auth/login:
+   *   post:
+   *     summary: Login with username and password
+   *     tags: [Authentication]
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             required:
+   *               - username
+   *               - password
+   *             properties:
+   *               username:
+   *                 type: string
+   *                 description: User's username
+   *                 example: john_doe
+   *               password:
+   *                 type: string
+   *                 description: User's password
+   *                 example: SecurePassword123!
+   *     responses:
+   *       200:
+   *         description: Successfully authenticated
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/AuthResult'
+   *       401:
+   *         description: Invalid credentials
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/Error'
+   *       429:
+   *         description: Too many login attempts (rate limited)
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/Error'
    */
   login = async (
     req: Request,
@@ -98,6 +194,27 @@ export class AuthController {
    * Get current user info
    * GET /api/auth/me
    * Returns: MeResponse with user object
+   *
+   * @swagger
+   * /auth/me:
+   *   get:
+   *     summary: Get current user information
+   *     tags: [Authentication]
+   *     security:
+   *       - bearerAuth: []
+   *     responses:
+   *       200:
+   *         description: Current user information
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/User'
+   *       401:
+   *         description: Unauthorized - Invalid or missing token
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/Error'
    */
   me = async (
     req: AuthRequest,

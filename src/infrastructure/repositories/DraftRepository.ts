@@ -127,7 +127,13 @@ export class DraftRepository implements IDraftRepository {
       LEFT JOIN rosters r ON d_order.roster_id = r.id
       LEFT JOIN users u ON r.user_id = u.id
       WHERE d_order.draft_id = $1
-      ORDER BY d_order.draft_position`,
+      ORDER BY
+        CASE
+          WHEN d_order.draft_position IS NULL THEN 1
+          ELSE 0
+        END,
+        d_order.draft_position ASC,
+        d_order.id ASC`,
       [draftId]
     );
 

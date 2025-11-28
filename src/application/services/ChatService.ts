@@ -7,6 +7,7 @@ import {
 } from '../../domain/models/Chat';
 import { ILeagueChatRepository } from '../../domain/repositories/ILeagueChatRepository';
 import { IDirectMessageRepository } from '../../domain/repositories/IDirectMessageRepository';
+import { sanitizeInput, sanitizeObject } from '../../app/common/utils/sanitizer';
 
 /**
  * ChatService
@@ -45,12 +46,18 @@ export class ChatService {
     messageType: string = 'chat',
     metadata: Record<string, any> = {}
   ): Promise<ChatMessage> {
+    // Sanitize the message to prevent XSS attacks
+    const sanitizedMessage = sanitizeInput(message);
+
+    // Sanitize metadata if it contains string values
+    const sanitizedMetadata = metadata ? sanitizeObject(metadata, Object.keys(metadata)) : {};
+
     const chatMessage = await this.leagueChatRepository.insertUserMessage(
       leagueId,
       userId,
-      message,
+      sanitizedMessage,
       messageType,
-      metadata
+      sanitizedMetadata
     );
 
     // Emit via events publisher
@@ -74,10 +81,14 @@ export class ChatService {
     metadata: Record<string, any> = {}
   ): Promise<void> {
     try {
+      // Sanitize the message (even system messages should be safe)
+      const sanitizedMessage = sanitizeInput(message);
+      const sanitizedMetadata = metadata ? sanitizeObject(metadata, Object.keys(metadata)) : {};
+
       const systemMessage = await this.leagueChatRepository.insertSystemMessage(
         leagueId,
-        message,
-        metadata
+        sanitizedMessage,
+        sanitizedMetadata
       );
 
       console.log(
@@ -133,11 +144,15 @@ export class ChatService {
     message: string,
     metadata: Record<string, any> = {}
   ): Promise<DirectMessage> {
+    // Sanitize the message to prevent XSS attacks
+    const sanitizedMessage = sanitizeInput(message);
+    const sanitizedMetadata = metadata ? sanitizeObject(metadata, Object.keys(metadata)) : {};
+
     const directMessage = await this.directMessageRepository.insertDirectMessage(
       senderId,
       receiverId,
-      message,
-      metadata
+      sanitizedMessage,
+      sanitizedMetadata
     );
 
     // Emit via events publisher
