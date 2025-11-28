@@ -1,10 +1,3 @@
-import DOMPurify from 'dompurify';
-import { JSDOM } from 'jsdom';
-
-// Create a window object for DOMPurify to use
-const window = new JSDOM('').window;
-const purify = DOMPurify(window as any);
-
 /**
  * Sanitize user input to prevent XSS attacks
  * Removes dangerous HTML and JavaScript
@@ -14,27 +7,21 @@ export function sanitizeInput(input: string): string {
     return '';
   }
 
-  // Configure DOMPurify - very strict for chat messages
-  const config = {
-    ALLOWED_TAGS: [], // No HTML tags allowed in chat
-    ALLOWED_ATTR: [],
-    KEEP_CONTENT: true, // Keep text content
-    RETURN_DOM: false,
-    RETURN_DOM_FRAGMENT: false,
-  };
-
-  // Clean the input
-  const cleaned = purify.sanitize(input, config);
-
-  // Additional sanitization for common XSS patterns
-  const sanitized = cleaned
+  // For chat messages, we don't need HTML at all
+  // Just escape dangerous characters and patterns
+  const sanitized = input
     .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '') // Remove any script tags
+    .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '') // Remove style tags
+    .replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, '') // Remove iframe tags
     .replace(/javascript:/gi, '') // Remove javascript: protocol
-    .replace(/on\w+\s*=/gi, '') // Remove event handlers
-    .replace(/[<>]/g, (match) => {
-      // Escape remaining angle brackets
-      return match === '<' ? '&lt;' : '&gt;';
-    })
+    .replace(/on\w+\s*=/gi, '') // Remove event handlers (onclick, onerror, etc)
+    .replace(/<[^>]*>/g, '') // Remove all HTML tags
+    .replace(/&(?!(amp|lt|gt|quot|#39|#x27|#x2F);)/g, '&amp;') // Escape unescaped ampersands
+    .replace(/</g, '&lt;') // Escape less than
+    .replace(/>/g, '&gt;') // Escape greater than
+    .replace(/"/g, '&quot;') // Escape quotes
+    .replace(/'/g, '&#39;') // Escape single quotes
+    .replace(/\//g, '&#x2F;') // Escape forward slash
     .trim();
 
   return sanitized;
@@ -49,16 +36,37 @@ export function sanitizeHtml(html: string): string {
     return '';
   }
 
-  // Configure DOMPurify - allow some formatting tags
-  const config = {
-    ALLOWED_TAGS: ['b', 'i', 'em', 'strong', 'u', 'p', 'br', 'span'],
-    ALLOWED_ATTR: ['class'], // Only allow class attribute
-    FORBID_TAGS: ['script', 'style', 'iframe', 'object', 'embed', 'form'],
-    FORBID_ATTR: ['onerror', 'onload', 'onclick', 'onmouseover'],
-    KEEP_CONTENT: true,
-  };
+  // First remove dangerous tags and content
+  let sanitized = html
+    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '') // Remove script tags
+    .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '') // Remove style tags
+    .replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, '') // Remove iframe tags
+    .replace(/<object\b[^<]*(?:(?!<\/object>)<[^<]*)*<\/object>/gi, '') // Remove object tags
+    .replace(/<embed\b[^<]*(?:(?!<\/embed>)<[^<]*)*<\/embed>/gi, '') // Remove embed tags
+    .replace(/<form\b[^<]*(?:(?!<\/form>)<[^<]*)*<\/form>/gi, '') // Remove form tags
+    .replace(/javascript:/gi, '') // Remove javascript: protocol
+    .replace(/on\w+\s*=/gi, ''); // Remove event handlers
 
-  return purify.sanitize(html, config);
+  // Allow only specific tags - very basic whitelist approach
+  const allowedTags = ['b', 'i', 'em', 'strong', 'u', 'p', 'br', 'span'];
+  const tagRegex = /<\/?([a-zA-Z]+)(?:\s[^>]*)?>/g;
+
+  sanitized = sanitized.replace(tagRegex, (match, tag) => {
+    const tagName = tag.toLowerCase();
+    if (allowedTags.includes(tagName)) {
+      // Strip all attributes except class from allowed tags
+      if (match.includes('class=')) {
+        const classMatch = match.match(/class="([^"]*)"/);
+        if (classMatch) {
+          return `<${tag} class="${classMatch[1]}">`;
+        }
+      }
+      return `<${tag}>`;
+    }
+    return ''; // Remove non-allowed tags
+  });
+
+  return sanitized.trim();
 }
 
 /**
