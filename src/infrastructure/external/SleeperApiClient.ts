@@ -21,6 +21,58 @@ export interface SleeperPlayer {
   college: string;
 }
 
+/**
+ * Sleeper player stats response
+ * Stats API returns an object keyed by player_id with stats for each player
+ */
+export interface SleeperPlayerStats {
+  player_id: string;
+  // Game context
+  week?: number;
+  season?: string;
+  season_type?: string;
+  game_id?: string;
+  team?: string;
+  opponent?: string;
+  // Passing stats
+  pass_yd?: number;
+  pass_td?: number;
+  pass_att?: number;
+  pass_cmp?: number;
+  pass_int?: number;
+  pass_2pt?: number;
+  // Rushing stats
+  rush_yd?: number;
+  rush_td?: number;
+  rush_att?: number;
+  rush_2pt?: number;
+  // Receiving stats
+  rec?: number;
+  rec_yd?: number;
+  rec_td?: number;
+  rec_tgt?: number;
+  rec_2pt?: number;
+  // Fumbles
+  fum?: number;
+  fum_lost?: number;
+  // Kicking
+  fgm?: number;
+  fga?: number;
+  fgm_0_19?: number;
+  fgm_20_29?: number;
+  fgm_30_39?: number;
+  fgm_40_49?: number;
+  fgm_50p?: number;
+  xpm?: number;
+  xpa?: number;
+  // Fantasy points (pre-calculated by Sleeper)
+  pts_std?: number;
+  pts_ppr?: number;
+  pts_half_ppr?: number;
+  // Additional fields stored in raw stats
+  [key: string]: any;
+}
+
 export class SleeperApiClient {
   private readonly client: AxiosInstance;
   private readonly baseUrl = 'https://api.sleeper.app/v1';
@@ -46,6 +98,68 @@ export class SleeperApiClient {
     } catch (error) {
       if (axios.isAxiosError(error)) {
         throw new Error(`Sleeper API request failed: ${error.message}`);
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Fetch weekly stats for all players
+   * @param season - Season year (e.g., "2025")
+   * @param week - Week number (1-18)
+   * @param seasonType - Season type (default: "regular")
+   * @returns Object keyed by player_id with stats
+   */
+  async fetchWeeklyStats(
+    season: string,
+    week: number,
+    seasonType: string = 'regular'
+  ): Promise<Record<string, SleeperPlayerStats>> {
+    try {
+      // Use api.sleeper.com for stats (different from api.sleeper.app)
+      const response = await axios.get(
+        `https://api.sleeper.com/stats/nfl/${season}/${week}`,
+        {
+          params: { season_type: seasonType },
+          timeout: 60000, // 60 second timeout for larger payload
+          headers: { 'Accept': 'application/json' },
+        }
+      );
+      return response.data;
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        throw new Error(`Sleeper stats API request failed: ${error.message}`);
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Fetch weekly projections for all players
+   * @param season - Season year (e.g., "2025")
+   * @param week - Week number (1-18)
+   * @param seasonType - Season type (default: "regular")
+   * @returns Object keyed by player_id with projections
+   */
+  async fetchWeeklyProjections(
+    season: string,
+    week: number,
+    seasonType: string = 'regular'
+  ): Promise<Record<string, SleeperPlayerStats>> {
+    try {
+      // Use api.sleeper.com for projections (different from api.sleeper.app)
+      const response = await axios.get(
+        `https://api.sleeper.com/projections/nfl/${season}/${week}`,
+        {
+          params: { season_type: seasonType },
+          timeout: 60000, // 60 second timeout for larger payload
+          headers: { 'Accept': 'application/json' },
+        }
+      );
+      return response.data;
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        throw new Error(`Sleeper projections API request failed: ${error.message}`);
       }
       throw error;
     }

@@ -93,6 +93,7 @@ const envSchema = z.object({
   ENABLE_DERBY_AUTOPICK: z.string().default('true').transform((val) => val === 'true'),
   ENABLE_DRAFT_AUTOPICK: z.string().default('true').transform((val) => val === 'true'),
   ENABLE_PLAYER_SYNC: z.string().default('true').transform((val) => val === 'true'),
+  ENABLE_STATS_SYNC: z.string().default('true').transform((val) => val === 'true'),
 });
 
 // Parse and validate environment variables

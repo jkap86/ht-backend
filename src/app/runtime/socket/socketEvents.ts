@@ -36,6 +36,12 @@ export const SocketEvents = {
 
   // Derby events
   DERBY_UPDATED: 'derby_updated',
+
+  // Matchup/Score events
+  JOIN_MATCHUP: 'join_matchup',
+  LEAVE_MATCHUP: 'leave_matchup',
+  SCORE_UPDATE: 'score_update',
+  LIVE_GAME_STATUS: 'live_game_status',
 } as const;
 
 /**

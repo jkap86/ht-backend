@@ -7,6 +7,8 @@ import { IDirectMessageRepository } from '../../domain/repositories/IDirectMessa
 import { IPlayerRepository } from '../../domain/repositories/IPlayerRepository';
 import { IDraftRepository } from '../../domain/repositories/IDraftRepository';
 import { IDraftQueueRepository } from '../../domain/repositories/IDraftQueueRepository';
+import { IPlayerStatsRepository } from '../../domain/repositories/IPlayerStatsRepository';
+import { IPlayerProjectionRepository } from '../../domain/repositories/IPlayerProjectionRepository';
 import { UserRepository } from '../repositories/UserRepository';
 import { LeagueRepository } from '../repositories/LeagueRepository';
 import { RosterRepository } from '../repositories/RosterRepository';
@@ -15,6 +17,8 @@ import { DirectMessageRepository } from '../repositories/DirectMessageRepository
 import { PlayerRepository } from '../repositories/PlayerRepository';
 import { DraftRepository } from '../repositories/DraftRepository';
 import { DraftQueueRepository } from '../repositories/DraftQueueRepository';
+import { PlayerStatsRepository } from '../repositories/PlayerStatsRepository';
+import { PlayerProjectionRepository } from '../repositories/PlayerProjectionRepository';
 import { AuthService } from '../../application/services/AuthService';
 import { LeagueService } from '../../application/services/LeagueService';
 import { LeaguePaymentService } from '../../application/services/league/LeaguePaymentService';
@@ -27,6 +31,11 @@ import { PlayerService } from '../../application/services/PlayerService';
 import { DraftService } from '../../application/services/DraftService';
 import { DraftQueueService } from '../../application/services/DraftQueueService';
 import { MatchupDraftService } from '../../application/services/MatchupDraftService';
+import { StatsService } from '../../application/services/StatsService';
+import { StatsSyncService } from '../../application/services/StatsSyncService';
+import { CurrentWeekService } from '../../application/services/CurrentWeekService';
+import { LiveScoreService } from '../../application/services/LiveScoreService';
+import { SleeperScheduleService } from '../external/SleeperScheduleService';
 import { SocketChatEventsPublisher } from '../../app/runtime/socket/SocketChatEventsPublisher';
 import { SocketDraftEventsPublisher } from '../../app/runtime/socket/SocketDraftEventsPublisher';
 import { SocketMatchupDraftEventsPublisher } from '../../app/runtime/socket/SocketMatchupDraftEventsPublisher';
@@ -52,6 +61,8 @@ export class Container {
   private _playerRepository?: IPlayerRepository;
   private _draftRepository?: IDraftRepository;
   private _draftQueueRepository?: IDraftQueueRepository;
+  private _playerStatsRepository?: IPlayerStatsRepository;
+  private _playerProjectionRepository?: IPlayerProjectionRepository;
 
   // Services
   private _authService?: AuthService;
@@ -70,6 +81,11 @@ export class Container {
   private _draftQueueService?: DraftQueueService;
   private _matchupDraftService?: MatchupDraftService;
   private _matchupDraftEventsPublisher?: IMatchupDraftEventsPublisher;
+  private _statsService?: StatsService;
+  private _statsSyncService?: StatsSyncService;
+  private _sleeperScheduleService?: SleeperScheduleService;
+  private _currentWeekService?: CurrentWeekService;
+  private _liveScoreService?: LiveScoreService;
 
   private constructor(pool: Pool) {
     this.pool = pool;
@@ -373,6 +389,91 @@ export class Container {
   }
 
   /**
+   * Get Player Stats Repository
+   */
+  getPlayerStatsRepository(): IPlayerStatsRepository {
+    if (!this._playerStatsRepository) {
+      this._playerStatsRepository = new PlayerStatsRepository(this.pool);
+    }
+    return this._playerStatsRepository;
+  }
+
+  /**
+   * Get Player Projection Repository
+   */
+  getPlayerProjectionRepository(): IPlayerProjectionRepository {
+    if (!this._playerProjectionRepository) {
+      this._playerProjectionRepository = new PlayerProjectionRepository(this.pool);
+    }
+    return this._playerProjectionRepository;
+  }
+
+  /**
+   * Get Stats Service
+   */
+  getStatsService(): StatsService {
+    if (!this._statsService) {
+      this._statsService = new StatsService(
+        this.getPlayerStatsRepository(),
+        this.getPlayerProjectionRepository(),
+        this.getLeagueRepository()
+      );
+    }
+    return this._statsService;
+  }
+
+  /**
+   * Get Stats Sync Service
+   */
+  getStatsSyncService(): StatsSyncService {
+    if (!this._statsSyncService) {
+      this._statsSyncService = new StatsSyncService(
+        this.getPlayerStatsRepository(),
+        this.getPlayerProjectionRepository(),
+        this.getSleeperApiClient()
+      );
+    }
+    return this._statsSyncService;
+  }
+
+  /**
+   * Get Sleeper Schedule Service
+   */
+  getSleeperScheduleService(): SleeperScheduleService {
+    if (!this._sleeperScheduleService) {
+      this._sleeperScheduleService = new SleeperScheduleService();
+    }
+    return this._sleeperScheduleService;
+  }
+
+  /**
+   * Get Current Week Service
+   */
+  getCurrentWeekService(): CurrentWeekService {
+    if (!this._currentWeekService) {
+      this._currentWeekService = new CurrentWeekService(
+        this.getSleeperScheduleService()
+      );
+    }
+    return this._currentWeekService;
+  }
+
+  /**
+   * Get Live Score Service
+   */
+  getLiveScoreService(): LiveScoreService {
+    if (!this._liveScoreService) {
+      this._liveScoreService = new LiveScoreService(
+        this.pool,
+        this.getSleeperScheduleService(),
+        this.getCurrentWeekService(),
+        this.getStatsSyncService()
+      );
+    }
+    return this._liveScoreService;
+  }
+
+  /**
    * Reset container (useful for testing)
    */
   reset(): void {
@@ -400,5 +501,12 @@ export class Container {
     this._draftQueueService = undefined;
     this._matchupDraftService = undefined;
     this._matchupDraftEventsPublisher = undefined;
+    this._playerStatsRepository = undefined;
+    this._playerProjectionRepository = undefined;
+    this._statsService = undefined;
+    this._statsSyncService = undefined;
+    this._sleeperScheduleService = undefined;
+    this._currentWeekService = undefined;
+    this._liveScoreService = undefined;
   }
 }

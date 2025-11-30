@@ -13,6 +13,7 @@ import { initializeSocketService } from "./app/runtime/socket/socket.service";
 import { processExpiredDerbyPicks } from "./app/runtime/jobs/derby-autopick.service";
 import { processExpiredDraftPicks } from "./app/runtime/jobs/draft-autopick.service";
 import { syncPlayersFromSleeper } from "./app/runtime/jobs/player-sync.service";
+import { syncStatsFromSleeper } from "./app/runtime/jobs/stats-sync.service";
 import { swaggerSpec } from "./config/swagger.config";
 import logger, { logInfo, logError, logWarn } from "./infrastructure/logger/Logger";
 
@@ -152,6 +153,24 @@ server.listen(PORT, () => {
     logInfo(`Player sync service initialized (runs every 12 hours)`);
   } else {
     logInfo(`Player sync service disabled via ENABLE_PLAYER_SYNC=false`);
+  }
+
+  // Initialize stats sync cron job (checks every 10 minutes for live games)
+  // Smart scheduling: only syncs when there are live or upcoming games
+  if (env.ENABLE_STATS_SYNC) {
+    cron.schedule('*/10 * * * *', async () => {
+      await syncStatsFromSleeper();
+    });
+    logInfo(`Stats sync service initialized (checks every 10 min, syncs only when games active)`);
+  } else {
+    logInfo(`Stats sync service disabled via ENABLE_STATS_SYNC=false`);
+  }
+
+  // Initialize live score updates service (real-time during games)
+  if (env.ENABLE_STATS_SYNC) {
+    const liveScoreService = Container.getInstance().getLiveScoreService();
+    liveScoreService.start();
+    logInfo(`Live score service initialized (updates every 10 seconds during games)`);
   }
 });
 

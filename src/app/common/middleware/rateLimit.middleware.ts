@@ -12,11 +12,7 @@ export const authRateLimit = rateLimit({
   standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
   legacyHeaders: false, // Disable the `X-RateLimit-*` headers
   skipSuccessfulRequests: false, // Count all requests, not just failed ones
-  keyGenerator: (req: Request) => {
-    // Use IP address as the key for rate limiting
-    return req.ip || 'unknown';
-  },
-  handler: (req: Request, res: Response) => {
+  handler: (_req: Request, res: Response) => {
     res.status(429).json({
       error: 'Too many login attempts from this IP, please try again after 15 minutes',
       retryAfter: 15 * 60, // seconds

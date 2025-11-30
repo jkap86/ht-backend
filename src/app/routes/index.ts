@@ -7,6 +7,7 @@ import directMessagesRoutes from "../directMessages/directMessages.routes";
 import draftsRoutes from "../drafts/drafts.routes";
 import matchupDraftsRoutes from "../matchup-drafts/matchup-drafts.routes";
 import playersRoutes from "../players/players.routes";
+import statsRoutes from "../stats/stats.routes";
 
 const router = Router();
 
@@ -18,5 +19,6 @@ router.use("/leagues", draftsRoutes); // Drafts routes are nested under leagues
 router.use("/leagues", matchupDraftsRoutes); // Matchup drafts routes are nested under leagues
 router.use("/direct-messages", directMessagesRoutes);
 router.use("/players", playersRoutes);
+router.use("/stats", statsRoutes);
 
 export default router;
