@@ -5,6 +5,7 @@ import { StatsSyncService } from './StatsSyncService';
 import { logInfo, logError, logWarn } from '../../infrastructure/logger/Logger';
 import { getSocketService } from '../../app/runtime/socket/socket.service';
 import { SocketEvents } from '../../app/runtime/socket/socketEvents';
+import { env } from '../../config/env.config';
 
 interface ActiveLeague {
   league_id: number;
@@ -29,7 +30,7 @@ interface MatchupScore {
 export class LiveScoreService {
   private updateInterval: NodeJS.Timeout | null = null;
   private isUpdating = false;
-  private readonly UPDATE_INTERVAL_MS = 10 * 1000; // 10 seconds
+  private readonly UPDATE_INTERVAL_MS = env.LIVE_STATS_SYNC_INTERVAL; // Default 10 seconds, configurable via env
 
   constructor(
     private pool: Pool,
@@ -238,10 +239,11 @@ export class LiveScoreService {
   }
 
   /**
-   * Start live score updates (every 10 seconds during games)
+   * Start live score updates during games
    */
   start(): void {
-    logInfo('[LiveScore] Starting live score updates (10 second interval)');
+    const intervalSec = this.UPDATE_INTERVAL_MS / 1000;
+    logInfo(`[LiveScore] Starting live score updates (${intervalSec} second interval)`);
 
     // Run immediately
     this.updateLiveScores();

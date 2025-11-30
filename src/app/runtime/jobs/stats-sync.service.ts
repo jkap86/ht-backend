@@ -93,6 +93,43 @@ export const syncStatsFromSleeper = async () => {
   }
 };
 
+let isProjectionsSyncing = false;
+
+/**
+ * Sync only projections from Sleeper API
+ * Runs on a separate schedule (every 15 minutes by default)
+ */
+export const syncProjectionsOnly = async () => {
+  if (isProjectionsSyncing) {
+    console.log('[Projections Sync] Sync already in progress, skipping...');
+    return;
+  }
+
+  try {
+    isProjectionsSyncing = true;
+
+    const { season, week } = await getCurrentNFLWeek();
+
+    console.log(`[Projections Sync] Starting projections sync for ${season} week ${week}...`);
+
+    const container = Container.getInstance();
+    const statsSyncService = container.getStatsSyncService();
+
+    const result = await statsSyncService.syncWeeklyProjections(season, week);
+
+    if (result.success) {
+      lastProjectionsSync = new Date();
+      console.log(`[Projections Sync] ✓ Completed - ${result.recordsUpserted} records updated`);
+    } else {
+      console.error(`[Projections Sync] ✗ Failed: ${result.error}`);
+    }
+  } catch (error) {
+    console.error('[Projections Sync] Unexpected error:', error);
+  } finally {
+    isProjectionsSyncing = false;
+  }
+};
+
 /**
  * Sync stats for a specific week (for manual triggers or backfills)
  */

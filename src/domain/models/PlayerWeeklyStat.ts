@@ -114,6 +114,11 @@ export class PlayerSeasonTotal {
     public readonly totalRecTd: number,
     public readonly totalFumLost: number,
     public readonly totalFgm: number,
+    public readonly totalFgm0_19: number,
+    public readonly totalFgm20_29: number,
+    public readonly totalFgm30_39: number,
+    public readonly totalFgm40_49: number,
+    public readonly totalFgm50p: number,
     public readonly totalXpm: number,
     public readonly lastUpdated: Date
   ) {}
@@ -133,6 +138,11 @@ export class PlayerSeasonTotal {
       parseInt(row.total_rec_td) || 0,
       parseInt(row.total_fum_lost) || 0,
       parseInt(row.total_fgm) || 0,
+      parseInt(row.total_fgm_0_19) || 0,
+      parseInt(row.total_fgm_20_29) || 0,
+      parseInt(row.total_fgm_30_39) || 0,
+      parseInt(row.total_fgm_40_49) || 0,
+      parseInt(row.total_fgm_50p) || 0,
       parseInt(row.total_xpm) || 0,
       row.last_updated
     );
@@ -153,6 +163,11 @@ export class PlayerSeasonTotal {
       total_rec_td: this.totalRecTd,
       total_fum_lost: this.totalFumLost,
       total_fgm: this.totalFgm,
+      total_fgm_0_19: this.totalFgm0_19,
+      total_fgm_20_29: this.totalFgm20_29,
+      total_fgm_30_39: this.totalFgm30_39,
+      total_fgm_40_49: this.totalFgm40_49,
+      total_fgm_50p: this.totalFgm50p,
       total_xpm: this.totalXpm,
       last_updated: this.lastUpdated,
     };

@@ -13,7 +13,7 @@ import { initializeSocketService } from "./app/runtime/socket/socket.service";
 import { processExpiredDerbyPicks } from "./app/runtime/jobs/derby-autopick.service";
 import { processExpiredDraftPicks } from "./app/runtime/jobs/draft-autopick.service";
 import { syncPlayersFromSleeper } from "./app/runtime/jobs/player-sync.service";
-import { syncStatsFromSleeper } from "./app/runtime/jobs/stats-sync.service";
+import { syncStatsFromSleeper, syncProjectionsOnly } from "./app/runtime/jobs/stats-sync.service";
 import { swaggerSpec } from "./config/swagger.config";
 import logger, { logInfo, logError, logWarn } from "./infrastructure/logger/Logger";
 
@@ -155,22 +155,23 @@ server.listen(PORT, () => {
     logInfo(`Player sync service disabled via ENABLE_PLAYER_SYNC=false`);
   }
 
-  // Initialize stats sync cron job (checks every 10 minutes for live games)
-  // Smart scheduling: only syncs when there are live or upcoming games
+  // Initialize projections sync cron job (every 15 minutes)
   if (env.ENABLE_STATS_SYNC) {
-    cron.schedule('*/10 * * * *', async () => {
-      await syncStatsFromSleeper();
+    cron.schedule('*/15 * * * *', async () => {
+      await syncProjectionsOnly();
     });
-    logInfo(`Stats sync service initialized (checks every 10 min, syncs only when games active)`);
-  } else {
-    logInfo(`Stats sync service disabled via ENABLE_STATS_SYNC=false`);
+    // Run immediately on startup
+    syncProjectionsOnly();
+    logInfo(`Projections sync service initialized (runs every 15 minutes)`);
   }
 
-  // Initialize live score updates service (real-time during games)
+  // Initialize live score updates service (syncs stats every 10 seconds during games)
   if (env.ENABLE_STATS_SYNC) {
     const liveScoreService = Container.getInstance().getLiveScoreService();
     liveScoreService.start();
-    logInfo(`Live score service initialized (updates every 10 seconds during games)`);
+    logInfo(`Live stats sync service initialized (updates every ${env.LIVE_STATS_SYNC_INTERVAL / 1000} seconds during games)`);
+  } else {
+    logInfo(`Stats sync service disabled via ENABLE_STATS_SYNC=false`);
   }
 });
 

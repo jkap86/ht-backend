@@ -112,8 +112,12 @@ export class FantasyPointsCalculator {
     // Fumbles
     points += (totals.totalFumLost * (this.settings.fumbles_lost ?? -2));
 
-    // Kicking (totals only has fgm total, not breakdown)
-    points += (totals.totalFgm * 3); // Average FG value
+    // Kicking - use FG distance breakdown for accurate scoring
+    points += (totals.totalFgm0_19 * (this.settings.fgm_0_19 ?? 3));
+    points += (totals.totalFgm20_29 * (this.settings.fgm_20_29 ?? 3));
+    points += (totals.totalFgm30_39 * (this.settings.fgm_30_39 ?? 3));
+    points += (totals.totalFgm40_49 * (this.settings.fgm_40_49 ?? 4));
+    points += (totals.totalFgm50p * (this.settings.fgm_50p ?? 5));
     points += (totals.totalXpm * (this.settings.xpm ?? 1));
 
     return Math.round(points * 100) / 100;

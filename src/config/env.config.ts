@@ -88,12 +88,17 @@ const envSchema = z.object({
   DERBY_JOB_INTERVAL: z.string().default('5000').transform((val) => parseInt(val, 10)),
   DRAFT_JOB_INTERVAL: z.string().default('10000').transform((val) => parseInt(val, 10)),
   PLAYER_SYNC_INTERVAL: z.string().default('3600000').transform((val) => parseInt(val, 10)), // Default 1 hour
+  LIVE_STATS_SYNC_INTERVAL: z.string().default('10000').transform((val) => parseInt(val, 10)), // Default 10 seconds during games
+  PROJECTIONS_SYNC_INTERVAL: z.string().default('900000').transform((val) => parseInt(val, 10)), // Default 15 minutes
 
   // Job toggles (enable/disable cron jobs)
   ENABLE_DERBY_AUTOPICK: z.string().default('true').transform((val) => val === 'true'),
   ENABLE_DRAFT_AUTOPICK: z.string().default('true').transform((val) => val === 'true'),
   ENABLE_PLAYER_SYNC: z.string().default('true').transform((val) => val === 'true'),
   ENABLE_STATS_SYNC: z.string().default('true').transform((val) => val === 'true'),
+
+  // API Keys for internal/admin endpoints
+  SYNC_API_KEY: z.string().min(32, 'SYNC_API_KEY must be at least 32 characters').optional(),
 });
 
 // Parse and validate environment variables

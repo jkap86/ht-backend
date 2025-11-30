@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { authMiddleware } from "../common/middleware/auth.middleware";
+import { apiKeyMiddleware } from "../common/middleware/apikey.middleware";
 import {
   getPlayerWeeklyStats,
   getPlayerSeasonStats,
@@ -17,15 +18,15 @@ import {
 
 const router = Router();
 
-// Sync endpoints - No auth required for admin scripts/cron jobs
+// Sync endpoints - Protected by API key for admin scripts/cron jobs
 // POST /api/stats/sync/stats/:season/:week
-router.post("/sync/stats/:season/:week", syncWeeklyStats);
+router.post("/sync/stats/:season/:week", apiKeyMiddleware, syncWeeklyStats);
 
 // POST /api/stats/sync/projections/:season/:week
-router.post("/sync/projections/:season/:week", syncWeeklyProjections);
+router.post("/sync/projections/:season/:week", apiKeyMiddleware, syncWeeklyProjections);
 
 // POST /api/stats/sync/all/:season/:week
-router.post("/sync/all/:season/:week", syncAll);
+router.post("/sync/all/:season/:week", apiKeyMiddleware, syncAll);
 
 // All other stats routes require authentication
 router.use(authMiddleware);

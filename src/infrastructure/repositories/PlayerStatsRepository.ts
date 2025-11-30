@@ -55,50 +55,64 @@ export class PlayerStatsRepository implements IPlayerStatsRepository {
       await client.query('BEGIN');
 
       let upsertedCount = 0;
-      const chunkSize = 500;
+      const chunkSize = 100; // Smaller chunks for bulk INSERT to avoid query size limits
 
       for (let i = 0; i < stats.length; i += chunkSize) {
         const chunk = stats.slice(i, i + chunkSize);
 
-        for (const stat of chunk) {
-          await client.query(
-            `INSERT INTO player_weekly_stats (
-              player_sleeper_id, season, week, season_type, stats,
-              pass_yd, pass_td, pass_int, rush_yd, rush_td,
-              rec, rec_yd, rec_td, fum_lost,
-              fgm, fgm_0_19, fgm_20_29, fgm_30_39, fgm_40_49, fgm_50p, xpm,
-              fetched_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, CURRENT_TIMESTAMP)
-            ON CONFLICT (player_sleeper_id, season, week, season_type) DO UPDATE SET
-              stats = EXCLUDED.stats,
-              pass_yd = EXCLUDED.pass_yd,
-              pass_td = EXCLUDED.pass_td,
-              pass_int = EXCLUDED.pass_int,
-              rush_yd = EXCLUDED.rush_yd,
-              rush_td = EXCLUDED.rush_td,
-              rec = EXCLUDED.rec,
-              rec_yd = EXCLUDED.rec_yd,
-              rec_td = EXCLUDED.rec_td,
-              fum_lost = EXCLUDED.fum_lost,
-              fgm = EXCLUDED.fgm,
-              fgm_0_19 = EXCLUDED.fgm_0_19,
-              fgm_20_29 = EXCLUDED.fgm_20_29,
-              fgm_30_39 = EXCLUDED.fgm_30_39,
-              fgm_40_49 = EXCLUDED.fgm_40_49,
-              fgm_50p = EXCLUDED.fgm_50p,
-              xpm = EXCLUDED.xpm,
-              fetched_at = CURRENT_TIMESTAMP,
-              updated_at = CURRENT_TIMESTAMP`,
-            [
-              stat.playerSleeperId, stat.season, stat.week, stat.seasonType,
-              JSON.stringify(stat.stats),
-              stat.passYd, stat.passTd, stat.passInt, stat.rushYd, stat.rushTd,
-              stat.rec, stat.recYd, stat.recTd, stat.fumLost,
-              stat.fgm, stat.fgm0_19, stat.fgm20_29, stat.fgm30_39, stat.fgm40_49, stat.fgm50p, stat.xpm
-            ]
+        // Build bulk INSERT with multiple VALUES
+        const values: any[] = [];
+        const valuePlaceholders: string[] = [];
+
+        chunk.forEach((stat, idx) => {
+          const offset = idx * 21;
+          valuePlaceholders.push(
+            `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, ` +
+            `$${offset + 6}, $${offset + 7}, $${offset + 8}, $${offset + 9}, $${offset + 10}, ` +
+            `$${offset + 11}, $${offset + 12}, $${offset + 13}, $${offset + 14}, $${offset + 15}, ` +
+            `$${offset + 16}, $${offset + 17}, $${offset + 18}, $${offset + 19}, $${offset + 20}, ` +
+            `$${offset + 21}, CURRENT_TIMESTAMP)`
           );
-          upsertedCount++;
-        }
+          values.push(
+            stat.playerSleeperId, stat.season, stat.week, stat.seasonType,
+            JSON.stringify(stat.stats),
+            stat.passYd, stat.passTd, stat.passInt, stat.rushYd, stat.rushTd,
+            stat.rec, stat.recYd, stat.recTd, stat.fumLost,
+            stat.fgm, stat.fgm0_19, stat.fgm20_29, stat.fgm30_39, stat.fgm40_49, stat.fgm50p, stat.xpm
+          );
+        });
+
+        await client.query(
+          `INSERT INTO player_weekly_stats (
+            player_sleeper_id, season, week, season_type, stats,
+            pass_yd, pass_td, pass_int, rush_yd, rush_td,
+            rec, rec_yd, rec_td, fum_lost,
+            fgm, fgm_0_19, fgm_20_29, fgm_30_39, fgm_40_49, fgm_50p, xpm,
+            fetched_at
+          ) VALUES ${valuePlaceholders.join(', ')}
+          ON CONFLICT (player_sleeper_id, season, week, season_type) DO UPDATE SET
+            stats = EXCLUDED.stats,
+            pass_yd = EXCLUDED.pass_yd,
+            pass_td = EXCLUDED.pass_td,
+            pass_int = EXCLUDED.pass_int,
+            rush_yd = EXCLUDED.rush_yd,
+            rush_td = EXCLUDED.rush_td,
+            rec = EXCLUDED.rec,
+            rec_yd = EXCLUDED.rec_yd,
+            rec_td = EXCLUDED.rec_td,
+            fum_lost = EXCLUDED.fum_lost,
+            fgm = EXCLUDED.fgm,
+            fgm_0_19 = EXCLUDED.fgm_0_19,
+            fgm_20_29 = EXCLUDED.fgm_20_29,
+            fgm_30_39 = EXCLUDED.fgm_30_39,
+            fgm_40_49 = EXCLUDED.fgm_40_49,
+            fgm_50p = EXCLUDED.fgm_50p,
+            xpm = EXCLUDED.xpm,
+            fetched_at = CURRENT_TIMESTAMP,
+            updated_at = CURRENT_TIMESTAMP`,
+          values
+        );
+        upsertedCount += chunk.length;
       }
 
       await client.query('COMMIT');
