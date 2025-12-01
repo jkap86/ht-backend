@@ -9,6 +9,9 @@ import {
   togglePaymentSchema,
   leagueIdParamSchema,
   rosterIdParamSchema,
+  createPayoutSchema,
+  updatePayoutSchema,
+  payoutIdParamSchema,
 } from "../validators/schemas/league.schemas";
 import {
   getMyLeagues,
@@ -21,6 +24,10 @@ import {
   devAddUsersToLeague,
   getLeagueMembers,
   toggleMemberPayment,
+  getPayouts,
+  addPayout,
+  updatePayout,
+  deletePayout,
 } from "./leagues.controller";
 import {
   getChatMessages,
@@ -67,5 +74,21 @@ router.get("/:id/members", getLeagueMembers);
 
 // PATCH /api/leagues/:id/members/:rosterId/payment - Toggle payment status for a member (commissioner only)
 router.patch("/:id/members/:rosterId/payment", validateRequest(leagueIdParamSchema, 'params'), validateRequest(rosterIdParamSchema, 'params'), validateRequest(togglePaymentSchema, 'body'), toggleMemberPayment);
+
+// ============================================
+// Payout Routes
+// ============================================
+
+// GET /api/leagues/:id/payouts - Get all payouts for a league
+router.get("/:id/payouts", getPayouts);
+
+// POST /api/leagues/:id/payouts - Add a new payout (commissioner only)
+router.post("/:id/payouts", validateRequest(leagueIdParamSchema, 'params'), validateRequest(createPayoutSchema, 'body'), addPayout);
+
+// PUT /api/leagues/:id/payouts/:payoutId - Update a payout (commissioner only)
+router.put("/:id/payouts/:payoutId", validateRequest(leagueIdParamSchema, 'params'), validateRequest(payoutIdParamSchema, 'params'), validateRequest(updatePayoutSchema, 'body'), updatePayout);
+
+// DELETE /api/leagues/:id/payouts/:payoutId - Delete a payout (commissioner only)
+router.delete("/:id/payouts/:payoutId", validateRequest(leagueIdParamSchema, 'params'), validateRequest(payoutIdParamSchema, 'params'), deletePayout);
 
 export default router;

@@ -169,6 +169,46 @@ export const togglePaymentSchema = z.object({
 });
 
 /**
+ * Payout type enum
+ */
+export const payoutTypeEnum = z.enum(['playoff_finish', 'reg_season_points']);
+
+/**
+ * Schema for a single payout entry
+ */
+export const payoutSchema = z.object({
+  id: z.string().optional(), // Generated on create if not provided
+  type: payoutTypeEnum,
+  place: z.number().int().min(1).max(20),
+  amount: z.number().min(0),
+});
+
+/**
+ * Schema for creating/updating a payout
+ */
+export const createPayoutSchema = z.object({
+  type: payoutTypeEnum,
+  place: z.number().int().min(1).max(20),
+  amount: z.number().min(0),
+});
+
+/**
+ * Schema for updating a payout
+ */
+export const updatePayoutSchema = z.object({
+  type: payoutTypeEnum.optional(),
+  place: z.number().int().min(1).max(20).optional(),
+  amount: z.number().min(0).optional(),
+});
+
+/**
+ * Schema for payout ID parameter
+ */
+export const payoutIdParamSchema = z.object({
+  payoutId: z.string().min(1, 'Payout ID is required'),
+});
+
+/**
  * Schema for roster ID parameter
  */
 export const rosterIdParamSchema = z.object({

@@ -8,6 +8,7 @@ import { LeaguePaymentService } from '../../application/services/league/LeaguePa
 import { LeagueResetService } from '../../application/services/league/LeagueResetService';
 import { LeagueMembershipService } from '../../application/services/league/LeagueMembershipService';
 import { LeagueSettingsService } from '../../application/services/league/LeagueSettingsService';
+import { pool } from '../../db/pool';
 
 // Helper function to get LeagueService from DI Container
 function getLeagueService(): LeagueService {
@@ -32,6 +33,29 @@ function getLeagueMembershipService(): LeagueMembershipService {
 // Helper function to get LeagueSettingsService from DI Container
 function getLeagueSettingsService(): LeagueSettingsService {
   return Container.getInstance().getLeagueSettingsService();
+}
+
+// Helper function to check if user is commissioner
+async function isUserCommissioner(leagueId: number, userId: string): Promise<boolean> {
+  const result = await pool.query(
+    `SELECT l.settings->>'commissioner_roster_id' as commissioner_roster_id,
+            r.roster_id
+     FROM leagues l
+     INNER JOIN rosters r ON r.league_id = l.id AND r.user_id = $2
+     WHERE l.id = $1`,
+    [leagueId, userId]
+  );
+
+  if (result.rows.length === 0) {
+    return false;
+  }
+
+  const row = result.rows[0];
+  return (
+    row.commissioner_roster_id &&
+    row.roster_id &&
+    row.commissioner_roster_id === row.roster_id.toString()
+  );
 }
 
 /**
@@ -401,6 +425,223 @@ export const toggleMemberPayment = async (
       rosterId: updatedRoster.roster_id,
       paid: (updatedRoster.settings as any).paid,
     });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ============================================
+// Payout Management Endpoints
+// ============================================
+
+interface Payout {
+  id: string;
+  type: 'playoff_finish' | 'reg_season_points';
+  place: number;
+  amount: number;
+}
+
+/**
+ * GET /api/leagues/:id/payouts
+ * Get all payouts for a league
+ */
+export const getPayouts = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const userId = req.user?.userId;
+    const leagueId = parseInt(req.params.id, 10);
+
+    if (!userId) {
+      throw new ValidationError('User ID not found in request');
+    }
+
+    if (isNaN(leagueId)) {
+      throw new ValidationError('Invalid league ID');
+    }
+
+    const league = await getLeagueService().getLeagueById(leagueId, userId);
+    const payouts = (league.settings as any)?.payouts || [];
+
+    return res.status(200).json({ payouts });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * POST /api/leagues/:id/payouts
+ * Add a new payout to a league (commissioner only)
+ */
+export const addPayout = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const userId = req.user?.userId;
+    const leagueId = parseInt(req.params.id, 10);
+    const { type, place, amount } = req.body;
+
+    if (!userId) {
+      throw new ValidationError('User ID not found in request');
+    }
+
+    if (isNaN(leagueId)) {
+      throw new ValidationError('Invalid league ID');
+    }
+
+    // Get current league
+    const league = await getLeagueService().getLeagueById(leagueId, userId);
+
+    // Verify user is commissioner
+    if (league.commissioner_roster_id) {
+      const commissionerCheck = await isUserCommissioner(leagueId, userId);
+      if (!commissionerCheck) {
+        throw new ValidationError('Only the commissioner can manage payouts');
+      }
+    }
+
+    // Get current payouts
+    const currentSettings = (league.settings as any) || {};
+    const payouts: Payout[] = currentSettings.payouts || [];
+
+    // Generate unique ID for the payout
+    const newPayout: Payout = {
+      id: `payout_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      type,
+      place,
+      amount,
+    };
+
+    // Add new payout
+    payouts.push(newPayout);
+
+    // Update league settings
+    await getLeagueSettingsService().updateLeague(leagueId, userId, {
+      settings: { ...currentSettings, payouts },
+    });
+
+    return res.status(201).json({ payout: newPayout });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * PUT /api/leagues/:id/payouts/:payoutId
+ * Update a payout (commissioner only)
+ */
+export const updatePayout = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const userId = req.user?.userId;
+    const leagueId = parseInt(req.params.id, 10);
+    const { payoutId } = req.params;
+    const { type, place, amount } = req.body;
+
+    if (!userId) {
+      throw new ValidationError('User ID not found in request');
+    }
+
+    if (isNaN(leagueId)) {
+      throw new ValidationError('Invalid league ID');
+    }
+
+    // Get current league
+    const league = await getLeagueService().getLeagueById(leagueId, userId);
+
+    // Verify user is commissioner
+    if (league.commissioner_roster_id) {
+      const commissionerCheck = await isUserCommissioner(leagueId, userId);
+      if (!commissionerCheck) {
+        throw new ValidationError('Only the commissioner can manage payouts');
+      }
+    }
+
+    // Get current payouts
+    const currentSettings = (league.settings as any) || {};
+    const payouts: Payout[] = currentSettings.payouts || [];
+
+    // Find and update payout
+    const payoutIndex = payouts.findIndex(p => p.id === payoutId);
+    if (payoutIndex === -1) {
+      throw new ValidationError('Payout not found');
+    }
+
+    // Update fields if provided
+    if (type !== undefined) payouts[payoutIndex].type = type;
+    if (place !== undefined) payouts[payoutIndex].place = place;
+    if (amount !== undefined) payouts[payoutIndex].amount = amount;
+
+    // Update league settings
+    await getLeagueSettingsService().updateLeague(leagueId, userId, {
+      settings: { ...currentSettings, payouts },
+    });
+
+    return res.status(200).json({ payout: payouts[payoutIndex] });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * DELETE /api/leagues/:id/payouts/:payoutId
+ * Delete a payout (commissioner only)
+ */
+export const deletePayout = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const userId = req.user?.userId;
+    const leagueId = parseInt(req.params.id, 10);
+    const { payoutId } = req.params;
+
+    if (!userId) {
+      throw new ValidationError('User ID not found in request');
+    }
+
+    if (isNaN(leagueId)) {
+      throw new ValidationError('Invalid league ID');
+    }
+
+    // Get current league
+    const league = await getLeagueService().getLeagueById(leagueId, userId);
+
+    // Verify user is commissioner
+    if (league.commissioner_roster_id) {
+      const commissionerCheck = await isUserCommissioner(leagueId, userId);
+      if (!commissionerCheck) {
+        throw new ValidationError('Only the commissioner can manage payouts');
+      }
+    }
+
+    // Get current payouts
+    const currentSettings = (league.settings as any) || {};
+    const payouts: Payout[] = currentSettings.payouts || [];
+
+    // Find payout
+    const payoutIndex = payouts.findIndex(p => p.id === payoutId);
+    if (payoutIndex === -1) {
+      throw new ValidationError('Payout not found');
+    }
+
+    // Remove payout
+    payouts.splice(payoutIndex, 1);
+
+    // Update league settings
+    await getLeagueSettingsService().updateLeague(leagueId, userId, {
+      settings: { ...currentSettings, payouts },
+    });
+
+    return res.status(200).json({ message: 'Payout deleted successfully' });
   } catch (error) {
     next(error);
   }
