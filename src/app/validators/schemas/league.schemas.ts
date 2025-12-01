@@ -209,9 +209,34 @@ export const payoutIdParamSchema = z.object({
 });
 
 /**
+ * Schema for combined league ID and payout ID parameters
+ */
+export const leaguePayoutParamsSchema = z.object({
+  id: z
+    .string()
+    .regex(/^\d+$/, 'League ID must be a number')
+    .transform(val => parseInt(val, 10)),
+  payoutId: z.string().min(1, 'Payout ID is required'),
+});
+
+/**
  * Schema for roster ID parameter
  */
 export const rosterIdParamSchema = z.object({
+  rosterId: z
+    .string()
+    .regex(/^\d+$/, 'Roster ID must be a number')
+    .transform(val => parseInt(val, 10)),
+});
+
+/**
+ * Schema for combined league ID and roster ID parameters
+ */
+export const leagueRosterParamsSchema = z.object({
+  id: z
+    .string()
+    .regex(/^\d+$/, 'League ID must be a number')
+    .transform(val => parseInt(val, 10)),
   rosterId: z
     .string()
     .regex(/^\d+$/, 'Roster ID must be a number')
