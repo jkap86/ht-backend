@@ -29,6 +29,8 @@ interface MatchupDraftPick {
   round: number;
   pickInRound: number;
   rosterId: number;
+  pickerUsername: string | null;
+  pickerRosterNumber: string | null;
   opponentRosterId: number;
   opponentUsername: string | null;
   opponentRosterNumber: string;
@@ -313,7 +315,12 @@ export class MatchupDraftRuntimeService {
    */
   async getMatchupDraftPicks(leagueId: number, draftId: number, userId: string): Promise<MatchupDraftPick[]> {
     const result = await this.pool.query(
-      'SELECT * FROM matchup_draft_picks WHERE draft_id = $1 ORDER BY pick_number ASC',
+      `SELECT mdp.*, u.username as picker_username, r.roster_id as picker_roster_number
+       FROM matchup_draft_picks mdp
+       JOIN rosters r ON r.id = mdp.roster_id
+       LEFT JOIN users u ON u.id = r.user_id
+       WHERE mdp.draft_id = $1
+       ORDER BY mdp.pick_number ASC`,
       [draftId]
     );
 

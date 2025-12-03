@@ -35,10 +35,10 @@ export class StatsSyncService {
 
       console.log(`[Stats Sync] Fetched ${statsArray.length} player stats from Sleeper API`);
 
-      // Transform to our format
+      // Transform to our format - use stats.player_id since API returns array with player_id inside each object
       const statsToUpsert: UpsertStatsData[] = statsArray
-        .filter(([playerId, stats]) => playerId && stats)
-        .map(([playerId, stats]) => this.transformStats(playerId, season, week, seasonType, stats));
+        .filter(([_, stats]) => stats && stats.player_id)
+        .map(([_, stats]) => this.transformStats(stats.player_id.toString(), season, week, seasonType, stats));
 
       console.log(`[Stats Sync] Upserting ${statsToUpsert.length} stats records...`);
 
@@ -105,10 +105,10 @@ export class StatsSyncService {
 
       console.log(`[Projections Sync] Fetched ${projectionsArray.length} player projections from Sleeper API`);
 
-      // Transform to our format
+      // Transform to our format - use proj.player_id since API returns array with player_id inside each object
       const projectionsToUpsert: UpsertProjectionData[] = projectionsArray
-        .filter(([playerId, proj]) => playerId && proj)
-        .map(([playerId, proj]) => this.transformProjection(playerId, season, week, seasonType, proj));
+        .filter(([_, proj]) => proj && proj.player_id)
+        .map(([_, proj]) => this.transformProjection(proj.player_id.toString(), season, week, seasonType, proj));
 
       console.log(`[Projections Sync] Upserting ${projectionsToUpsert.length} projection records...`);
 
@@ -188,20 +188,23 @@ export class StatsSyncService {
 
   /**
    * Transform Sleeper stats format to our domain format
+   * Note: Sleeper API returns stats nested in stats.stats object
    */
   private transformStats(
     playerId: string,
     season: string,
     week: number,
     seasonType: string,
-    stats: SleeperPlayerStats
+    rawStats: SleeperPlayerStats
   ): UpsertStatsData {
+    // Stats are nested inside rawStats.stats
+    const stats = (rawStats as any).stats || {};
     return {
       playerSleeperId: playerId,
       season,
       week,
       seasonType,
-      stats: stats, // Store raw stats as JSONB
+      stats: rawStats, // Store full raw object as JSONB
       passYd: stats.pass_yd ?? 0,
       passTd: stats.pass_td ?? 0,
       passInt: stats.pass_int ?? 0,
@@ -223,23 +226,26 @@ export class StatsSyncService {
 
   /**
    * Transform Sleeper projection format to our domain format
+   * Note: Sleeper API returns projections nested in proj.stats object
    */
   private transformProjection(
     playerId: string,
     season: string,
     week: number,
     seasonType: string,
-    proj: SleeperPlayerStats
+    rawProj: SleeperPlayerStats
   ): UpsertProjectionData {
+    // Projections are nested inside rawProj.stats
+    const stats = (rawProj as any).stats || {};
     return {
       playerSleeperId: playerId,
       season,
       week,
       seasonType,
-      projections: proj, // Store raw projections as JSONB
-      projPtsPpr: proj.pts_ppr ?? null,
-      projPtsHalfPpr: proj.pts_half_ppr ?? null,
-      projPtsStd: proj.pts_std ?? null,
+      projections: rawProj, // Store full raw object as JSONB
+      projPtsPpr: stats.pts_ppr ?? null,
+      projPtsHalfPpr: stats.pts_half_ppr ?? null,
+      projPtsStd: stats.pts_std ?? null,
     };
   }
 }

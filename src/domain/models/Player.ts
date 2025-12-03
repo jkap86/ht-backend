@@ -20,7 +20,11 @@ export class Player {
     public readonly weight: string | null,
     public readonly college: string | null,
     public readonly createdAt: Date,
-    public readonly updatedAt: Date
+    public readonly updatedAt: Date,
+    // Fantasy stats fields
+    public readonly priorSeasonPts: number | null = null,
+    public readonly seasonToDatePts: number | null = null,
+    public readonly remainingProjectedPts: number | null = null
   ) {}
 
   static fromDatabase(row: any): Player {
@@ -45,7 +49,41 @@ export class Player {
       row.weight,
       row.college,
       row.created_at,
-      row.updated_at
+      row.updated_at,
+      // Fantasy stats fields
+      row.prior_season_pts != null ? parseFloat(row.prior_season_pts) : null,
+      row.season_to_date_pts != null ? parseFloat(row.season_to_date_pts) : null,
+      row.remaining_projected_pts != null ? parseFloat(row.remaining_projected_pts) : null
     );
+  }
+
+  toJSON(): Record<string, any> {
+    return {
+      id: this.id,
+      sleeperId: this.sleeperId,
+      firstName: this.firstName,
+      lastName: this.lastName,
+      fullName: this.fullName,
+      fantasyPositions: this.fantasyPositions,
+      position: this.position,
+      team: this.team,
+      yearsExp: this.yearsExp,
+      age: this.age,
+      active: this.active,
+      status: this.status,
+      injuryStatus: this.injuryStatus,
+      injuryNotes: this.injuryNotes,
+      depthChartPosition: this.depthChartPosition,
+      number: this.jerseyNumber,
+      height: this.height,
+      weight: this.weight,
+      college: this.college,
+      createdAt: this.createdAt,
+      updatedAt: this.updatedAt,
+      // Fantasy stats
+      priorSeasonPts: this.priorSeasonPts,
+      seasonToDatePts: this.seasonToDatePts,
+      remainingProjectedPts: this.remainingProjectedPts,
+    };
   }
 }

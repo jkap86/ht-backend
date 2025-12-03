@@ -9,6 +9,7 @@ import { DraftConfigService } from './DraftConfigService';
 import { DraftRuntimeService } from './DraftRuntimeService';
 import { DerbyService } from './DerbyService';
 import { DraftUtilityService } from './DraftUtilityService';
+import { CurrentWeekService } from './CurrentWeekService';
 
 /**
  * Main DraftService facade - delegates to specialized services
@@ -23,6 +24,7 @@ export class DraftService {
   constructor(
     draftRepository: IDraftRepository,
     pool: Pool,
+    currentWeekService: CurrentWeekService,
     eventsPublisher?: IDraftEventsPublisher,
     queueService?: DraftQueueService
   ) {
@@ -35,6 +37,7 @@ export class DraftService {
       draftRepository,
       pool,
       this.utilityService,
+      currentWeekService,
       eventsPublisher,
       queueService
     );

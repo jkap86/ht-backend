@@ -175,3 +175,33 @@ export const randomizeMatchupDraftOrder = async (
     next(error);
   }
 };
+
+/**
+ * POST /api/leagues/:leagueId/matchup-drafts/generate-random
+ * Generate random matchups for all regular season weeks (commissioner only)
+ */
+export const generateRandomMatchups = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const leagueId = parseInt(req.params.leagueId, 10);
+    const userId = req.user?.userId;
+
+    if (isNaN(leagueId)) {
+      throw new ValidationError("Invalid league ID");
+    }
+
+    if (!userId) {
+      throw new ValidationError("User ID not found in request");
+    }
+
+    const matchupDraftService = Container.getInstance().getMatchupDraftService();
+    const result = await matchupDraftService.generateRandomMatchups(leagueId, userId);
+
+    return res.status(200).json(result);
+  } catch (error) {
+    next(error);
+  }
+};

@@ -1,5 +1,17 @@
 import axios, { AxiosInstance } from 'axios';
 
+export interface SleeperNflState {
+  season: string;
+  leg: number; // Current week number
+  season_type: string;
+  season_start_date: string;
+  display_week: number;
+  week: number;
+  previous_season: string;
+  league_season: string;
+  league_create_season: string;
+}
+
 export interface SleeperPlayer {
   player_id: string;
   first_name: string;
@@ -85,6 +97,22 @@ export class SleeperApiClient {
         'Accept': 'application/json',
       },
     });
+  }
+
+  /**
+   * Fetch current NFL state (season, week, etc.)
+   * Returns the current season and leg (week number)
+   */
+  async fetchNflState(): Promise<SleeperNflState> {
+    try {
+      const response = await this.client.get('/state/nfl');
+      return response.data;
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        throw new Error(`Sleeper NFL state API request failed: ${error.message}`);
+      }
+      throw error;
+    }
   }
 
   /**

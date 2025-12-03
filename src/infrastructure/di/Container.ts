@@ -358,6 +358,7 @@ export class Container {
       this._draftService = new DraftService(
         this.getDraftRepository(),
         this.pool,
+        this.getCurrentWeekService(),
         this.getDraftEventsPublisher(),
         this.getDraftQueueService()
       );
@@ -451,9 +452,7 @@ export class Container {
    */
   getCurrentWeekService(): CurrentWeekService {
     if (!this._currentWeekService) {
-      this._currentWeekService = new CurrentWeekService(
-        this.getSleeperScheduleService()
-      );
+      this._currentWeekService = new CurrentWeekService();
     }
     return this._currentWeekService;
   }

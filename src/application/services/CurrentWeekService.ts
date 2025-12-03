@@ -1,82 +1,146 @@
-import { SleeperScheduleService } from '../../infrastructure/external/SleeperScheduleService';
+import { SleeperApiClient, SleeperNflState } from '../../infrastructure/external/SleeperApiClient';
 import { logInfo, logError } from '../../infrastructure/logger/Logger';
 
-interface CurrentWeekCache {
+interface NflStateCache {
   season: string;
   week: number;
+  seasonType: string;
   lastUpdated: number;
 }
 
-// In-memory cache (refreshed every hour)
-let currentWeekCache: CurrentWeekCache | null = null;
-const CACHE_TTL = 60 * 60 * 1000; // 1 hour
+// In-memory cache (refreshed every 15 minutes)
+let nflStateCache: NflStateCache | null = null;
+const CACHE_TTL = 15 * 60 * 1000; // 15 minutes
 
 /**
- * Service for determining the current NFL week
+ * Service for determining the current NFL season and week
+ * Uses Sleeper API /state/nfl endpoint
  */
 export class CurrentWeekService {
-  constructor(private scheduleService: SleeperScheduleService) {}
+  private sleeperClient: SleeperApiClient;
+
+  constructor() {
+    this.sleeperClient = new SleeperApiClient();
+  }
 
   /**
-   * Get the current NFL week by checking Sleeper's schedule
-   * Checks weeks sequentially to find the first week with upcoming or in-progress games
+   * Get the current NFL state from Sleeper API
+   * Returns season, week (leg), and season_type
    */
-  async getCurrentNFLWeek(
-    season: string,
-    seasonType: string = 'regular'
-  ): Promise<number> {
-    // Check cache first
+  async getNflState(): Promise<{ season: string; week: number; seasonType: string }> {
     const now = Date.now();
-    if (
-      currentWeekCache &&
-      currentWeekCache.season === season &&
-      now - currentWeekCache.lastUpdated < CACHE_TTL
-    ) {
-      logInfo(`[CurrentWeek] Using cached week ${currentWeekCache.week}`);
-      return currentWeekCache.week;
-    }
 
-    logInfo(`[CurrentWeek] Detecting current week for ${season}...`);
+    // Check cache first
+    if (nflStateCache && now - nflStateCache.lastUpdated < CACHE_TTL) {
+      logInfo(`[CurrentWeek] Using cached state - Season: ${nflStateCache.season}, Week: ${nflStateCache.week}`);
+      return {
+        season: nflStateCache.season,
+        week: nflStateCache.week,
+        seasonType: nflStateCache.seasonType,
+      };
+    }
 
     try {
-      // Check weeks 1-18 to find current week
-      for (let week = 1; week <= 18; week++) {
-        const schedule = await this.scheduleService.getWeekSchedule(season, week, seasonType);
+      logInfo('[CurrentWeek] Fetching NFL state from Sleeper API...');
+      const state = await this.sleeperClient.fetchNflState();
 
-        if (schedule.length === 0) {
-          // No games scheduled for this week, we've gone too far
-          const currentWeek = Math.max(1, week - 1);
-          currentWeekCache = { season, week: currentWeek, lastUpdated: now };
-          logInfo(`[CurrentWeek] Detected week ${currentWeek} (no more games scheduled)`);
-          return currentWeek;
-        }
+      // Update cache
+      nflStateCache = {
+        season: state.season,
+        week: state.leg,
+        seasonType: state.season_type || 'regular',
+        lastUpdated: now,
+      };
 
-        // Check if any games are upcoming or in progress
-        const hasUpcomingOrLive = schedule.some(
-          (game) => game.status === 'in_progress' || game.status === 'pre_game'
-        );
+      logInfo(`[CurrentWeek] NFL state fetched - Season: ${state.season}, Week: ${state.leg}`);
 
-        if (hasUpcomingOrLive) {
-          // This is the current week
-          currentWeekCache = { season, week, lastUpdated: now };
-          logInfo(`[CurrentWeek] Detected week ${week} (has upcoming/live games)`);
-          return week;
-        }
+      return {
+        season: state.season,
+        week: state.leg,
+        seasonType: state.season_type || 'regular',
+      };
+    } catch (error) {
+      logError(error as Error, { context: 'CurrentWeekService.getNflState' });
 
-        // If all games are complete, check next week
+      // If cache exists but expired, use it as fallback
+      if (nflStateCache) {
+        logInfo('[CurrentWeek] Using expired cache as fallback');
+        return {
+          season: nflStateCache.season,
+          week: nflStateCache.week,
+          seasonType: nflStateCache.seasonType,
+        };
       }
 
-      // Fallback: if we checked all weeks, return week 18
-      const fallbackWeek = 18;
-      currentWeekCache = { season, week: fallbackWeek, lastUpdated: now };
-      logInfo(`[CurrentWeek] Using fallback week ${fallbackWeek} (all weeks complete)`);
-      return fallbackWeek;
-    } catch (error) {
-      logError(error as Error, { context: 'CurrentWeekService.getCurrentNFLWeek' });
-
-      // Fallback to date-based estimation
-      return this.estimateWeekByDate(season);
+      // Last resort: estimate based on date
+      const season = this.estimateSeasonByDate();
+      const week = this.estimateWeekByDate(season);
+      return { season, week, seasonType: 'regular' };
     }
+  }
+
+  /**
+   * Get the current NFL week
+   * Uses the leg field from Sleeper's /state/nfl endpoint
+   */
+  async getCurrentNFLWeek(): Promise<number> {
+    const state = await this.getNflState();
+    return state.week;
+  }
+
+  /**
+   * Get current season year from Sleeper API
+   */
+  async getCurrentSeason(): Promise<string> {
+    const state = await this.getNflState();
+    return state.season;
+  }
+
+  /**
+   * Get current season synchronously (uses cache or date estimate)
+   * Use this only when async is not possible
+   */
+  getCurrentSeasonSync(): string {
+    if (nflStateCache) {
+      return nflStateCache.season;
+    }
+    return this.estimateSeasonByDate();
+  }
+
+  /**
+   * Get current week synchronously (uses cache or date estimate)
+   * Use this only when async is not possible
+   */
+  getCurrentWeekSync(): number {
+    if (nflStateCache) {
+      return nflStateCache.week;
+    }
+    const season = this.estimateSeasonByDate();
+    return this.estimateWeekByDate(season);
+  }
+
+  /**
+   * Force refresh the cache
+   */
+  refreshCache(): void {
+    nflStateCache = null;
+    logInfo('[CurrentWeek] Cache cleared');
+  }
+
+  /**
+   * Estimate season based on calendar (fallback method)
+   */
+  private estimateSeasonByDate(): string {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = now.getMonth(); // 0-indexed
+
+    // If we're before September, use previous year's season
+    if (month < 8) { // Before September
+      return (year - 1).toString();
+    }
+
+    return year.toString();
   }
 
   /**
@@ -121,29 +185,5 @@ export class CurrentWeekService {
     const dayOfWeek = sept1.getDay();
     const daysUntilThursday = (4 - dayOfWeek + 7) % 7;
     return new Date(year, 8, 1 + daysUntilThursday);
-  }
-
-  /**
-   * Force refresh the current week cache
-   */
-  refreshCache(): void {
-    currentWeekCache = null;
-    logInfo('[CurrentWeek] Cache cleared');
-  }
-
-  /**
-   * Get current season year
-   */
-  getCurrentSeason(): string {
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = now.getMonth(); // 0-indexed
-
-    // If we're before September, use previous year's season
-    if (month < 8) { // Before September
-      return (year - 1).toString();
-    }
-
-    return year.toString();
   }
 }

@@ -41,6 +41,31 @@ export interface PlayerFilters {
   search?: string;
 }
 
+export interface ScoringSettings {
+  passing_yards?: number;
+  passing_td?: number;
+  interceptions?: number;
+  rushing_yards?: number;
+  rushing_td?: number;
+  receptions?: number;
+  receiving_yards?: number;
+  receiving_td?: number;
+  fumbles_lost?: number;
+  fgm_0_19?: number;
+  fgm_20_29?: number;
+  fgm_30_39?: number;
+  fgm_40_49?: number;
+  fgm_50p?: number;
+  xpm?: number;
+  [key: string]: number | undefined;
+}
+
+export interface SeasonContext {
+  currentSeason: string;
+  currentWeek: number;
+  scoringSettings: ScoringSettings;
+}
+
 export interface IDraftRepository {
   // Draft CRUD
   findById(draftId: number): Promise<DraftData | null>;
@@ -55,7 +80,7 @@ export interface IDraftRepository {
   getDraftedPlayerIds(draftId: number): Promise<number[]>;
 
   // Available Players
-  getAvailablePlayers(draftId: number, playerPool: string, filters?: PlayerFilters): Promise<Player[]>;
+  getAvailablePlayers(draftId: number, playerPool: string, filters?: PlayerFilters, allowedPositions?: string[], seasonContext?: SeasonContext): Promise<Player[]>;
   isPlayerAvailable(draftId: number, playerId: number): Promise<boolean>;
 
   // Autopick Status

@@ -6,7 +6,9 @@ import {
   IDraftRepository,
   DraftData,
   CreatePickData,
-  PlayerFilters
+  PlayerFilters,
+  SeasonContext,
+  ScoringSettings
 } from '../../domain/repositories/IDraftRepository';
 
 export class DraftRepository implements IDraftRepository {
@@ -207,51 +209,186 @@ export class DraftRepository implements IDraftRepository {
   async getAvailablePlayers(
     draftId: number,
     playerPool: string,
-    filters?: PlayerFilters
+    filters?: PlayerFilters,
+    allowedPositions?: string[],
+    seasonContext?: SeasonContext
   ): Promise<Player[]> {
     // Get already drafted player IDs
     const draftedIds = await this.getDraftedPlayerIds(draftId);
 
     // Build query
-    const conditions: string[] = ['active = true'];
+    const conditions: string[] = ['p.active = true'];
     const values: any[] = [];
     let paramIndex = 1;
 
     // Player pool filter
     if (playerPool === 'rookie') {
-      conditions.push(`years_exp = 0`);
+      conditions.push(`p.years_exp = 0`);
     } else if (playerPool === 'vet') {
-      conditions.push(`years_exp > 0`);
+      conditions.push(`p.years_exp > 0`);
     }
 
     // Exclude drafted players
     if (draftedIds.length > 0) {
-      conditions.push(`id != ALL($${paramIndex++})`);
+      conditions.push(`p.id != ALL($${paramIndex++})`);
       values.push(draftedIds);
     }
 
-    // Position filter
-    if (filters?.position && filters.position !== 'ALL') {
-      conditions.push(`position = $${paramIndex++}`);
-      values.push(filters.position);
+    // Filter by allowed positions from league roster configuration
+    if (allowedPositions && allowedPositions.length > 0) {
+      // If user also specified a position filter, only include it if it's in allowed positions
+      if (filters?.position && filters.position !== 'ALL') {
+        // User wants specific position - check if it's allowed
+        if (allowedPositions.includes(filters.position.toUpperCase())) {
+          conditions.push(`p.position = $${paramIndex++}`);
+          values.push(filters.position);
+        } else {
+          // Position requested but not allowed - return empty
+          return [];
+        }
+      } else {
+        // No specific position filter - use all allowed positions
+        conditions.push(`p.position = ANY($${paramIndex++})`);
+        values.push(allowedPositions);
+      }
+    } else {
+      // No roster config - fall back to original position filter behavior
+      if (filters?.position && filters.position !== 'ALL') {
+        conditions.push(`p.position = $${paramIndex++}`);
+        values.push(filters.position);
+      }
     }
 
     // Team filter
     if (filters?.team) {
-      conditions.push(`team = $${paramIndex++}`);
+      conditions.push(`p.team = $${paramIndex++}`);
       values.push(filters.team);
     }
 
     // Search filter
     if (filters?.search) {
-      conditions.push(`full_name ILIKE $${paramIndex++}`);
+      conditions.push(`p.full_name ILIKE $${paramIndex++}`);
       values.push(`%${filters.search}%`);
     }
 
+    // Build stats subqueries if season context is provided
+    let statsSelect = '';
+    let statsJoins = '';
+
+    if (seasonContext) {
+      const { currentSeason, currentWeek, scoringSettings } = seasonContext;
+      const priorSeason = (parseInt(currentSeason) - 1).toString();
+
+      // Default scoring multipliers (standard scoring as fallback)
+      const passYdMult = scoringSettings.passing_yards ?? 0.04;
+      const passTdMult = scoringSettings.passing_td ?? 4;
+      const passIntMult = scoringSettings.interceptions ?? -2;
+      const rushYdMult = scoringSettings.rushing_yards ?? 0.1;
+      const rushTdMult = scoringSettings.rushing_td ?? 6;
+      const recMult = scoringSettings.receptions ?? 0;
+      const recYdMult = scoringSettings.receiving_yards ?? 0.1;
+      const recTdMult = scoringSettings.receiving_td ?? 6;
+      const fumLostMult = scoringSettings.fumbles_lost ?? -2;
+      const fgm0_19Mult = scoringSettings.fgm_0_19 ?? 3;
+      const fgm20_29Mult = scoringSettings.fgm_20_29 ?? 3;
+      const fgm30_39Mult = scoringSettings.fgm_30_39 ?? 3;
+      const fgm40_49Mult = scoringSettings.fgm_40_49 ?? 4;
+      const fgm50pMult = scoringSettings.fgm_50p ?? 5;
+      const xpmMult = scoringSettings.xpm ?? 1;
+
+      // Build the points calculation SQL expression for actual stats
+      const pointsCalcStats = `(
+        COALESCE(pass_yd, 0) * ${passYdMult} +
+        COALESCE(pass_td, 0) * ${passTdMult} +
+        COALESCE(pass_int, 0) * ${passIntMult} +
+        COALESCE(rush_yd, 0) * ${rushYdMult} +
+        COALESCE(rush_td, 0) * ${rushTdMult} +
+        COALESCE(rec, 0) * ${recMult} +
+        COALESCE(rec_yd, 0) * ${recYdMult} +
+        COALESCE(rec_td, 0) * ${recTdMult} +
+        COALESCE(fum_lost, 0) * ${fumLostMult} +
+        COALESCE(fgm_0_19, 0) * ${fgm0_19Mult} +
+        COALESCE(fgm_20_29, 0) * ${fgm20_29Mult} +
+        COALESCE(fgm_30_39, 0) * ${fgm30_39Mult} +
+        COALESCE(fgm_40_49, 0) * ${fgm40_49Mult} +
+        COALESCE(fgm_50p, 0) * ${fgm50pMult} +
+        COALESCE(xpm, 0) * ${xpmMult}
+      )`;
+
+      // Build the points calculation SQL expression for projections (uses JSONB)
+      const pointsCalcProj = `(
+        COALESCE((projections->'stats'->>'pass_yd')::numeric, 0) * ${passYdMult} +
+        COALESCE((projections->'stats'->>'pass_td')::numeric, 0) * ${passTdMult} +
+        COALESCE((projections->'stats'->>'pass_int')::numeric, 0) * ${passIntMult} +
+        COALESCE((projections->'stats'->>'rush_yd')::numeric, 0) * ${rushYdMult} +
+        COALESCE((projections->'stats'->>'rush_td')::numeric, 0) * ${rushTdMult} +
+        COALESCE((projections->'stats'->>'rec')::numeric, 0) * ${recMult} +
+        COALESCE((projections->'stats'->>'rec_yd')::numeric, 0) * ${recYdMult} +
+        COALESCE((projections->'stats'->>'rec_td')::numeric, 0) * ${recTdMult} +
+        COALESCE((projections->'stats'->>'fum_lost')::numeric, 0) * ${fumLostMult} +
+        COALESCE((projections->'stats'->>'fgm_0_19')::numeric, 0) * ${fgm0_19Mult} +
+        COALESCE((projections->'stats'->>'fgm_20_29')::numeric, 0) * ${fgm20_29Mult} +
+        COALESCE((projections->'stats'->>'fgm_30_39')::numeric, 0) * ${fgm30_39Mult} +
+        COALESCE((projections->'stats'->>'fgm_40_49')::numeric, 0) * ${fgm40_49Mult} +
+        COALESCE((projections->'stats'->>'fgm_50p')::numeric, 0) * ${fgm50pMult} +
+        COALESCE((projections->'stats'->>'xpm')::numeric, 0) * ${xpmMult}
+      )`;
+
+      statsSelect = `,
+        prior_stats.total_pts as prior_season_pts,
+        ytd_stats.total_pts as season_to_date_pts,
+        proj_stats.total_pts as remaining_projected_pts`;
+
+      // Add season parameters
+      // Prior season: full previous season (e.g., 2024 weeks 1-18)
+      values.push(priorSeason);
+      const priorSeasonIdx = paramIndex++;
+      // YTD: current season weeks played so far (e.g., 2025 weeks 1-13)
+      values.push(currentSeason);
+      const currentSeasonIdx = paramIndex++;
+      values.push(currentWeek); // week < currentWeek
+      const currentWeekIdx = paramIndex++;
+      // Projections: use current week projection and multiply by remaining weeks
+      values.push(currentSeason);
+      const projSeasonIdx = paramIndex++;
+      values.push(currentWeek);
+      const projWeekIdx = paramIndex++;
+
+      // Calculate remaining weeks (from currentWeek to week 18 inclusive)
+      const remainingWeeks = 19 - currentWeek; // e.g., week 14 = 5 remaining weeks (14,15,16,17,18)
+
+      // Calculate points using league scoring settings and raw stats
+      statsJoins = `
+        LEFT JOIN (
+          SELECT player_sleeper_id, SUM(${pointsCalcStats}) as total_pts
+          FROM player_weekly_stats
+          WHERE season = $${priorSeasonIdx} AND season_type = 'regular'
+          GROUP BY player_sleeper_id
+        ) prior_stats ON prior_stats.player_sleeper_id = p.sleeper_id
+        LEFT JOIN (
+          SELECT player_sleeper_id, SUM(${pointsCalcStats}) as total_pts
+          FROM player_weekly_stats
+          WHERE season = $${currentSeasonIdx} AND week < $${currentWeekIdx} AND season_type = 'regular'
+          GROUP BY player_sleeper_id
+        ) ytd_stats ON ytd_stats.player_sleeper_id = p.sleeper_id
+        LEFT JOIN (
+          SELECT player_sleeper_id, ${pointsCalcProj} * ${remainingWeeks} as total_pts
+          FROM player_projections
+          WHERE season = $${projSeasonIdx} AND week = $${projWeekIdx} AND season_type = 'regular'
+        ) proj_stats ON proj_stats.player_sleeper_id = p.sleeper_id`;
+    }
+
+    // Order by projected points (descending) to show most relevant players first
+    const orderBy = seasonContext
+      ? 'COALESCE(proj_stats.total_pts, 0) DESC, COALESCE(prior_stats.total_pts, 0) DESC, p.full_name'
+      : 'p.full_name';
+
     const query = `
-      SELECT * FROM players
+      SELECT p.*${statsSelect}
+      FROM players p
+      ${statsJoins}
       WHERE ${conditions.join(' AND ')}
-      ORDER BY full_name
+      ORDER BY ${orderBy}
       LIMIT 500
     `;
 

@@ -19,19 +19,18 @@ function getScheduleService(): SleeperScheduleService {
 
 function getCurrentWeekService(): CurrentWeekService {
   if (!currentWeekService) {
-    currentWeekService = new CurrentWeekService(getScheduleService());
+    currentWeekService = new CurrentWeekService();
   }
   return currentWeekService;
 }
 
 /**
- * Get current NFL season and week using API-based detection
+ * Get current NFL season and week using Sleeper API
  */
 async function getCurrentNFLWeek(): Promise<{ season: string; week: number }> {
   const weekService = getCurrentWeekService();
-  const season = weekService.getCurrentSeason();
-  const week = await weekService.getCurrentNFLWeek(season, 'regular');
-  return { season, week };
+  const nflState = await weekService.getNflState();
+  return { season: nflState.season, week: nflState.week };
 }
 
 /**

@@ -210,4 +210,147 @@ export class MatchupDraftConfigService {
       draftPosition: row.draft_position,
     }));
   }
+
+  /**
+   * Generate matchups using round-robin scheduling
+   * Commissioner-only operation
+   */
+  async generateRandomMatchups(leagueId: number, userId: string): Promise<{ success: boolean; draftId: number }> {
+    // Verify commissioner
+    await this.utilityService.verifyCommissioner(leagueId, userId);
+
+    // Get or create matchup draft
+    const draft = await this.getOrCreateMatchupDraft(leagueId, userId);
+
+    // Get league settings
+    const league = await this.utilityService.getLeagueSettings(leagueId);
+    const startWeek = league.settings?.start_week || 1;
+    const playoffWeekStart = league.settings?.playoff_week_start || 15;
+    const totalRosters = league.total_rosters || 12;
+    const totalWeeks = playoffWeekStart - startWeek;
+
+    // Get rosters with user info, limited to total_rosters setting
+    const rostersResult = await this.pool.query(
+      `SELECT r.id, r.roster_id, r.user_id, u.username
+       FROM rosters r
+       LEFT JOIN users u ON u.id = r.user_id
+       WHERE r.league_id = $1
+       ORDER BY (r.user_id IS NOT NULL) DESC, r.roster_id ASC
+       LIMIT $2`,
+      [leagueId, totalRosters]
+    );
+
+    if (rostersResult.rows.length === 0) {
+      throw new ValidationException('No rosters found in this league');
+    }
+
+    if (rostersResult.rows.length % 2 !== 0) {
+      throw new ValidationException(`League must have an even number of teams for matchup generation (found ${rostersResult.rows.length}, expected ${totalRosters})`);
+    }
+
+    const teams = rostersResult.rows;
+    const numTeams = teams.length;
+
+    // Generate round-robin schedule
+    // For N teams, one complete cycle takes N-1 rounds (each team plays every other team once)
+    const roundRobinSchedule = this.generateRoundRobinSchedule(numTeams);
+
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Delete any existing matchup picks for this draft
+      await client.query('DELETE FROM matchup_draft_picks WHERE draft_id = $1', [draft.id]);
+
+      let pickNumber = 1;
+
+      // Generate matchups for each week using round-robin
+      for (let weekIndex = 0; weekIndex < totalWeeks; weekIndex++) {
+        const week = startWeek + weekIndex;
+        // Cycle through round-robin schedule (repeat if more weeks than teams-1)
+        const roundIndex = weekIndex % roundRobinSchedule.length;
+        const matchups = roundRobinSchedule[roundIndex];
+
+        for (let matchupIndex = 0; matchupIndex < matchups.length; matchupIndex++) {
+          const [teamAIndex, teamBIndex] = matchups[matchupIndex];
+          const teamA = teams[teamAIndex];
+          const teamB = teams[teamBIndex];
+
+          // Insert matchup for teamA (playing against teamB)
+          await client.query(
+            `INSERT INTO matchup_draft_picks
+             (draft_id, pick_number, round, pick_in_round, roster_id,
+              opponent_roster_id, opponent_username, opponent_roster_number, week_number, is_auto_pick)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, true)`,
+            [
+              draft.id,
+              pickNumber++,
+              week,
+              matchupIndex + 1,
+              teamA.id,
+              teamB.roster_id,
+              teamB.username || `Team ${teamB.roster_id}`,
+              teamB.roster_id.toString(),
+              week,
+            ]
+          );
+        }
+      }
+
+      // Mark draft as completed
+      await client.query(
+        `UPDATE matchup_drafts
+         SET status = 'completed', completed_at = NOW(), updated_at = NOW()
+         WHERE id = $1`,
+        [draft.id]
+      );
+
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+
+    return { success: true, draftId: draft.id };
+  }
+
+  /**
+   * Generate a round-robin schedule for N teams
+   * Returns an array of rounds, where each round is an array of [teamA, teamB] matchups
+   * Uses the "circle method" - fix team 0, rotate all others
+   */
+  private generateRoundRobinSchedule(numTeams: number): [number, number][][] {
+    const schedule: [number, number][][] = [];
+    const numRounds = numTeams - 1;
+    const halfSize = numTeams / 2;
+
+    // Create array of team indices [0, 1, 2, ..., n-1]
+    const teams: number[] = [];
+    for (let i = 0; i < numTeams; i++) {
+      teams.push(i);
+    }
+
+    // Generate each round
+    for (let round = 0; round < numRounds; round++) {
+      const roundMatchups: [number, number][] = [];
+
+      // Pair teams from opposite ends
+      for (let i = 0; i < halfSize; i++) {
+        const home = teams[i];
+        const away = teams[numTeams - 1 - i];
+        roundMatchups.push([home, away]);
+      }
+
+      schedule.push(roundMatchups);
+
+      // Rotate: keep first team fixed, rotate others clockwise
+      // [0, 1, 2, 3, 4, 5] -> [0, 5, 1, 2, 3, 4]
+      const lastTeam = teams.pop()!;
+      teams.splice(1, 0, lastTeam);
+    }
+
+    return schedule;
+  }
 }

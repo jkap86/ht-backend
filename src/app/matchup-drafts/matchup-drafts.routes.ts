@@ -18,6 +18,7 @@ import {
   resumeMatchupDraft,
   makeMatchupPick,
   randomizeMatchupDraftOrder,
+  generateRandomMatchups,
 } from "./matchup-drafts.commands.controller";
 
 const router = Router();
@@ -54,5 +55,8 @@ router.post("/:leagueId/matchup-drafts/:draftId/pick", makeMatchupPick);
 
 // POST /api/leagues/:leagueId/matchup-drafts/:draftId/randomize - Randomize draft order (commissioner only)
 router.post("/:leagueId/matchup-drafts/:draftId/randomize", randomizeMatchupDraftOrder);
+
+// POST /api/leagues/:leagueId/matchup-drafts/generate-random - Generate random matchups for all weeks (commissioner only)
+router.post("/:leagueId/matchup-drafts/generate-random", generateRandomMatchups);
 
 export default router;

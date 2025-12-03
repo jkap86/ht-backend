@@ -27,6 +27,8 @@ interface MatchupDraftPick {
   round: number;
   pickInRound: number;
   rosterId: number;
+  pickerUsername: string | null;
+  pickerRosterNumber: string | null;
   opponentRosterId: number;
   opponentUsername: string | null;
   opponentRosterNumber: string;
@@ -78,6 +80,8 @@ export class MatchupDraftUtilityService {
       round: row.round,
       pickInRound: row.pick_in_round,
       rosterId: row.roster_id,
+      pickerUsername: row.picker_username || null,
+      pickerRosterNumber: row.picker_roster_number?.toString() || null,
       opponentRosterId: row.opponent_roster_id,
       opponentUsername: row.opponent_username,
       opponentRosterNumber: row.opponent_roster_number,

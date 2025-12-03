@@ -52,13 +52,15 @@ export class LiveScoreService {
       `;
       const result = await this.pool.query(query);
 
+      // Get current NFL state from Sleeper API
+      const nflState = await this.currentWeekService.getNflState();
+      const currentWeek = nflState.week;
+      const currentSeason = nflState.season;
+
       const activeLeagues: ActiveLeague[] = [];
       for (const row of result.rows) {
-        const currentWeek = await this.currentWeekService.getCurrentNFLWeek(
-          row.season,
-          row.season_type || 'regular'
-        );
-        if (currentWeek > 0 && currentWeek <= 18) {
+        // Only include leagues with matching current season
+        if (row.season === currentSeason && currentWeek > 0 && currentWeek <= 18) {
           activeLeagues.push({
             league_id: row.league_id,
             season: row.season,

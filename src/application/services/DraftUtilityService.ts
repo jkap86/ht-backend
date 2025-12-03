@@ -111,6 +111,69 @@ export class DraftUtilityService {
   }
 
   /**
+   * Get league roster positions configuration
+   */
+  async getLeagueRosterPositions(leagueId: number): Promise<any[]> {
+    const result = await this.pool.query(
+      'SELECT roster_positions FROM leagues WHERE id = $1',
+      [leagueId]
+    );
+
+    if (result.rows.length === 0) return [];
+    return result.rows[0].roster_positions || [];
+  }
+
+  /**
+   * Get league scoring settings
+   */
+  async getLeagueScoringSettings(leagueId: number): Promise<Record<string, number>> {
+    const result = await this.pool.query(
+      'SELECT scoring_settings FROM leagues WHERE id = $1',
+      [leagueId]
+    );
+
+    if (result.rows.length === 0) return {};
+    return result.rows[0].scoring_settings || {};
+  }
+
+  /**
+   * Get allowed player positions based on league roster configuration
+   * Maps roster slots to the actual player positions they accept
+   */
+  getAllowedPositionsFromRoster(rosterPositions: any[]): string[] {
+    const allowedPositions = new Set<string>();
+
+    // Define what player positions each roster slot accepts
+    const slotToPositions: { [key: string]: string[] } = {
+      'QB': ['QB'],
+      'RB': ['RB'],
+      'WR': ['WR'],
+      'TE': ['TE'],
+      'K': ['K'],
+      'DEF': ['DEF'],
+      'FLEX': ['WR', 'RB', 'TE'],
+      'SUPER_FLEX': ['QB', 'WR', 'RB', 'TE'],
+      'BENCH': ['QB', 'WR', 'RB', 'TE', 'K', 'DEF'], // Bench accepts all
+    };
+
+    for (const slot of rosterPositions) {
+      const position = slot.position?.toUpperCase();
+      const count = slot.count || 0;
+
+      if (count > 0 && position) {
+        // Use flex_eligible if specified, otherwise use default mapping
+        if (slot.flex_eligible && slot.flex_eligible.length > 0) {
+          slot.flex_eligible.forEach((pos: string) => allowedPositions.add(pos.toUpperCase()));
+        } else if (slotToPositions[position]) {
+          slotToPositions[position].forEach(pos => allowedPositions.add(pos));
+        }
+      }
+    }
+
+    return Array.from(allowedPositions);
+  }
+
+  /**
    * Map database row to DraftData (transforms snake_case to camelCase)
    */
   mapDraftRow(row: any): DraftData {

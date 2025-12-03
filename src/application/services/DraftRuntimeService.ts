@@ -6,6 +6,7 @@ import { Player } from '../../domain/models/Player';
 import { IDraftEventsPublisher } from './IDraftEventsPublisher';
 import { DraftQueueService } from './DraftQueueService';
 import { DraftUtilityService } from './DraftUtilityService';
+import { CurrentWeekService } from './CurrentWeekService';
 import { ValidationException, NotFoundException, ServerException } from '../../domain/exceptions/AuthExceptions';
 import { withTransaction } from '../../db/transaction';
 
@@ -18,6 +19,7 @@ export class DraftRuntimeService {
     private readonly draftRepository: IDraftRepository,
     private readonly pool: Pool,
     private readonly utilityService: DraftUtilityService,
+    private readonly currentWeekService: CurrentWeekService,
     private readonly eventsPublisher?: IDraftEventsPublisher,
     private readonly queueService?: DraftQueueService
   ) {}
@@ -380,13 +382,35 @@ export class DraftRuntimeService {
 
   /**
    * Get available players with filters
+   * Filters players based on league roster position configuration
+   * Includes fantasy stats (prior season, season-to-date, projections) using league scoring settings
    */
   async getAvailablePlayers(draftId: number, filters?: PlayerFilters): Promise<Player[]> {
     const draft = await this.draftRepository.findById(draftId);
     if (!draft) throw new NotFoundException('Draft not found');
 
     const playerPool = draft.settings?.player_pool || 'all';
-    return this.draftRepository.getAvailablePlayers(draftId, playerPool, filters);
+
+    // Get league roster positions to determine allowed player positions
+    const rosterPositions = await this.utilityService.getLeagueRosterPositions(draft.leagueId);
+    let allowedPositions: string[] | undefined;
+
+    if (rosterPositions && rosterPositions.length > 0) {
+      allowedPositions = this.utilityService.getAllowedPositionsFromRoster(rosterPositions);
+    }
+
+    // Get league scoring settings
+    const scoringSettings = await this.utilityService.getLeagueScoringSettings(draft.leagueId);
+
+    // Get current season and week for stats context
+    const nflState = await this.currentWeekService.getNflState();
+    const seasonContext = {
+      currentSeason: nflState.season,
+      currentWeek: nflState.week,
+      scoringSettings
+    };
+
+    return this.draftRepository.getAvailablePlayers(draftId, playerPool, filters, allowedPositions, seasonContext);
   }
 
   /**

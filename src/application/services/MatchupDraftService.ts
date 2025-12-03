@@ -84,6 +84,10 @@ export class MatchupDraftService {
     return this.configService.randomizeMatchupDraftOrder(leagueId, draftId, userId);
   }
 
+  async generateRandomMatchups(leagueId: number, userId: string): Promise<{ success: boolean; draftId: number }> {
+    return this.configService.generateRandomMatchups(leagueId, userId);
+  }
+
   // ==========================================
   // Runtime Operations - Delegate to MatchupDraftRuntimeService
   // ==========================================
