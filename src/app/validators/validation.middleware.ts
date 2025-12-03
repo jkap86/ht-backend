@@ -15,8 +15,15 @@ export function validateRequest(
       const data = req[source];
       const validated = await schema.parseAsync(data);
 
-      // Replace the request data with validated data
-      req[source] = validated;
+      // For query params, we can't reassign req.query directly (it's a getter)
+      // Instead, mutate the existing object or use body/params which are writable
+      if (source === 'query') {
+        // Clear existing keys and assign validated values
+        Object.keys(req.query).forEach(key => delete req.query[key]);
+        Object.assign(req.query, validated);
+      } else {
+        req[source] = validated;
+      }
 
       next();
     } catch (error) {
@@ -30,6 +37,7 @@ export function validateRequest(
         });
       }
 
+      console.error('Validation middleware error:', error);
       return res.status(500).json({
         error: 'Internal server error during validation',
       });

@@ -30,11 +30,11 @@ export const userIdParamSchema = z.object({
 export const conversationQuerySchema = z.object({
   limit: z
     .string()
+    .regex(/^\d+$/, { message: 'Limit must be a number' })
+    .transform(val => parseInt(val, 10))
     .optional()
-    .default('100')
-    .refine(val => /^\d+$/.test(val), { message: 'Limit must be a number' })
-    .transform(val => parseInt(val, 10)),
-});
+    .default(100),
+}).passthrough();
 
 /**
  * Type exports
