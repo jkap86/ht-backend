@@ -331,19 +331,45 @@ export class DraftRuntimeService {
       }
     }
 
-    // Fall back to random player if no queue or queue is empty
+    // Fall back to highest projected value player if no queue or queue is empty
     if (!selectedPlayer) {
       const playerPool = draft.settings?.player_pool || 'all';
-      const availablePlayers = await this.draftRepository.getAvailablePlayers(draftId, playerPool);
+
+      // Get allowed positions based on league roster configuration
+      const rosterPositions = await this.utilityService.getLeagueRosterPositions(draft.leagueId);
+      let allowedPositions: string[] | undefined;
+      if (rosterPositions && rosterPositions.length > 0) {
+        allowedPositions = this.utilityService.getAllowedPositionsFromRoster(rosterPositions);
+      }
+
+      // Get scoring settings for projected value calculation
+      const scoringSettings = await this.utilityService.getLeagueScoringSettings(draft.leagueId);
+
+      // Get current season/week context
+      const nflState = await this.currentWeekService.getNflState();
+      const seasonContext = {
+        currentSeason: nflState.season,
+        currentWeek: nflState.week,
+        scoringSettings
+      };
+
+      // Get available players sorted by projected value
+      const availablePlayers = await this.draftRepository.getAvailablePlayers(
+        draftId,
+        playerPool,
+        undefined, // no additional filters
+        allowedPositions,
+        seasonContext
+      );
 
       if (availablePlayers.length === 0) {
         // No players available - complete draft?
         return null;
       }
 
-      // Select random player
-      selectedPlayer = availablePlayers[Math.floor(Math.random() * availablePlayers.length)];
-      console.log(`[Draft Auto-Pick] No queue, selecting random player: ${selectedPlayer.fullName}`);
+      // Select first player (highest projected value due to ORDER BY in query)
+      selectedPlayer = availablePlayers[0];
+      console.log(`[Draft Auto-Pick] No queue, selecting highest projected player: ${selectedPlayer.fullName} (${selectedPlayer.position})`);
     }
 
     // Create auto-pick
@@ -418,6 +444,66 @@ export class DraftRuntimeService {
    */
   async getDraftPicks(draftId: number): Promise<DraftPick[]> {
     return this.draftRepository.getDraftPicks(draftId);
+  }
+
+  /**
+   * Get draft picks with stats and opponent for a specific week
+   */
+  async getDraftPicksWithStats(leagueId: number, draftId: number, season: string, week: number): Promise<DraftPick[]> {
+    // Get league scoring settings
+    const leagueResult = await this.pool.query(
+      'SELECT scoring_settings FROM leagues WHERE id = $1',
+      [leagueId]
+    );
+
+    const scoringSettings = leagueResult.rows[0]?.scoring_settings || {};
+
+    // Get picks with stats
+    const picks = await this.draftRepository.getDraftPicksWithStats(draftId, season, week, scoringSettings);
+
+    // Get NFL schedule for opponent lookup
+    const { SleeperScheduleService } = await import('../../infrastructure/external/SleeperScheduleService');
+    const scheduleService = new SleeperScheduleService();
+    const schedule = await scheduleService.getWeekSchedule(season, week, 'regular');
+
+    // Build team->opponent map
+    const teamOpponents: Map<string, string> = new Map();
+    for (const game of schedule) {
+      const homeTeam = game.metadata?.home_team?.toUpperCase();
+      const awayTeam = game.metadata?.away_team?.toUpperCase();
+      if (homeTeam && awayTeam) {
+        teamOpponents.set(homeTeam, `vs ${awayTeam}`);
+        teamOpponents.set(awayTeam, `@ ${homeTeam}`);
+      }
+    }
+
+    // Add opponent to each pick
+    return picks.map(pick => {
+      const team = pick.playerTeam?.toUpperCase();
+      const opponent = team ? teamOpponents.get(team) : undefined;
+
+      // Create new DraftPick with opponent
+      return new DraftPick(
+        pick.id,
+        pick.draftId,
+        pick.pickNumber,
+        pick.round,
+        pick.pickInRound,
+        pick.rosterId,
+        pick.playerId,
+        pick.isAutoPick,
+        pick.pickedAt,
+        pick.pickTimeSeconds,
+        pick.createdAt,
+        pick.playerName,
+        pick.playerPosition,
+        pick.playerTeam,
+        opponent,
+        pick.projectedPts,
+        pick.actualPts,
+        pick.playerSleeperId
+      );
+    });
   }
 
   /**

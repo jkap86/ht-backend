@@ -104,6 +104,9 @@ export const getDraftOrder = async (
 /**
  * GET /api/leagues/:leagueId/drafts/:draftId/picks
  * Get all picks for a draft
+ * Optional query params:
+ *   - week: NFL week number to include stats/projections for
+ *   - season: NFL season (defaults to current)
  */
 export const getDraftPicks = async (
   req: AuthRequest,
@@ -126,8 +129,18 @@ export const getDraftPicks = async (
     }
 
     const draftService = Container.getInstance().getDraftService();
-    const picks = await draftService.getDraftPicks(draftId);
 
+    // Check if week is provided for enhanced stats
+    const week = req.query.week ? parseInt(req.query.week as string, 10) : null;
+    const season = (req.query.season as string) || new Date().getFullYear().toString();
+
+    if (week && !isNaN(week)) {
+      // Get picks with stats and add opponent info
+      const picks = await draftService.getDraftPicksWithStats(leagueId, draftId, season, week);
+      return res.status(200).json(picks);
+    }
+
+    const picks = await draftService.getDraftPicks(draftId);
     return res.status(200).json(picks);
   } catch (error) {
     next(error);

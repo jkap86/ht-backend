@@ -13,7 +13,12 @@ export class DraftPick {
     public readonly createdAt: Date,
     public readonly playerName?: string,
     public readonly playerPosition?: string,
-    public readonly playerTeam?: string
+    public readonly playerTeam?: string,
+    // Enhanced fields for matchup display
+    public readonly opponent?: string,
+    public readonly projectedPts?: number,
+    public readonly actualPts?: number,
+    public readonly playerSleeperId?: string
   ) {}
 
   static fromDatabase(row: any): DraftPick {
@@ -31,7 +36,11 @@ export class DraftPick {
       row.created_at,
       row.player_name,
       row.player_position,
-      row.player_team
+      row.player_team,
+      row.opponent,
+      row.projected_pts != null ? parseFloat(row.projected_pts) : undefined,
+      row.actual_pts != null ? parseFloat(row.actual_pts) : undefined,
+      row.player_sleeper_id
     );
   }
 
@@ -50,7 +59,11 @@ export class DraftPick {
       created_at: this.createdAt,
       player_name: this.playerName,
       player_position: this.playerPosition,
-      player_team: this.playerTeam
+      player_team: this.playerTeam,
+      opponent: this.opponent,
+      projected_pts: this.projectedPts,
+      actual_pts: this.actualPts,
+      player_sleeper_id: this.playerSleeperId
     };
   }
 }

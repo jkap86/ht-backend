@@ -76,6 +76,7 @@ export interface IDraftRepository {
 
   // Draft Picks
   getDraftPicks(draftId: number): Promise<DraftPick[]>;
+  getDraftPicksWithStats(draftId: number, season: string, week: number, scoringSettings: ScoringSettings): Promise<DraftPick[]>;
   createPick(pickData: CreatePickData): Promise<DraftPick>;
   getDraftedPlayerIds(draftId: number): Promise<number[]>;
 

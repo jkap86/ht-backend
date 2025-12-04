@@ -288,7 +288,7 @@ export class MatchupDraftConfigService {
               week,
               matchupIndex + 1,
               teamA.id,
-              teamB.roster_id,
+              teamB.id,  // Fixed: Use database ID instead of roster number
               teamB.username || `Team ${teamB.roster_id}`,
               teamB.roster_id.toString(),
               week,

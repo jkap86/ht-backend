@@ -159,6 +159,75 @@ export class DraftRepository implements IDraftRepository {
     return result.rows.map(row => DraftPick.fromDatabase(row));
   }
 
+  /**
+   * Get draft picks with weekly stats and projections for matchup display
+   */
+  async getDraftPicksWithStats(
+    draftId: number,
+    season: string,
+    week: number,
+    scoringSettings: ScoringSettings
+  ): Promise<DraftPick[]> {
+    // Use league's actual scoring settings for both projections and actual stats
+    const passYdMult = scoringSettings.passing_yards ?? 0.04;
+    const passTdMult = scoringSettings.passing_td ?? 4;
+    const passIntMult = scoringSettings.interceptions ?? -2;
+    const rushYdMult = scoringSettings.rushing_yards ?? 0.1;
+    const rushTdMult = scoringSettings.rushing_td ?? 6;
+    const recMult = scoringSettings.receptions ?? 0.5;
+    const recYdMult = scoringSettings.receiving_yards ?? 0.1;
+    const recTdMult = scoringSettings.receiving_td ?? 6;
+    const fumLostMult = scoringSettings.fumbles_lost ?? -2;
+
+    // Points calculation for actual stats (weekly stats table has flat columns)
+    const pointsCalcStats = `(
+      COALESCE(ws.pass_yd, 0) * ${passYdMult} +
+      COALESCE(ws.pass_td, 0) * ${passTdMult} +
+      COALESCE(ws.pass_int, 0) * ${passIntMult} +
+      COALESCE(ws.rush_yd, 0) * ${rushYdMult} +
+      COALESCE(ws.rush_td, 0) * ${rushTdMult} +
+      COALESCE(ws.rec, 0) * ${recMult} +
+      COALESCE(ws.rec_yd, 0) * ${recYdMult} +
+      COALESCE(ws.rec_td, 0) * ${recTdMult} +
+      COALESCE(ws.fum_lost, 0) * ${fumLostMult}
+    )`;
+
+    // Points calculation for projections (uses JSONB - stats are in projections->'stats')
+    const pointsCalcProj = `(
+      COALESCE((pp.projections->'stats'->>'pass_yd')::numeric, 0) * ${passYdMult} +
+      COALESCE((pp.projections->'stats'->>'pass_td')::numeric, 0) * ${passTdMult} +
+      COALESCE((pp.projections->'stats'->>'pass_int')::numeric, 0) * ${passIntMult} +
+      COALESCE((pp.projections->'stats'->>'rush_yd')::numeric, 0) * ${rushYdMult} +
+      COALESCE((pp.projections->'stats'->>'rush_td')::numeric, 0) * ${rushTdMult} +
+      COALESCE((pp.projections->'stats'->>'rec')::numeric, 0) * ${recMult} +
+      COALESCE((pp.projections->'stats'->>'rec_yd')::numeric, 0) * ${recYdMult} +
+      COALESCE((pp.projections->'stats'->>'rec_td')::numeric, 0) * ${recTdMult} +
+      COALESCE((pp.projections->'stats'->>'fum_lost')::numeric, 0) * ${fumLostMult}
+    )`;
+
+    const result = await this.db.query(
+      `SELECT
+        dp.*,
+        p.full_name as player_name,
+        p.position as player_position,
+        p.team as player_team,
+        p.sleeper_id as player_sleeper_id,
+        CASE WHEN pp.id IS NOT NULL THEN ${pointsCalcProj} ELSE NULL END as projected_pts,
+        CASE WHEN ws.id IS NOT NULL THEN ${pointsCalcStats} ELSE NULL END as actual_pts
+      FROM draft_picks dp
+      LEFT JOIN players p ON p.id = dp.player_id
+      LEFT JOIN player_projections pp ON pp.player_sleeper_id = p.sleeper_id
+        AND pp.season = $2 AND pp.week = $3 AND pp.season_type = 'regular'
+      LEFT JOIN player_weekly_stats ws ON ws.player_sleeper_id = p.sleeper_id
+        AND ws.season = $2 AND ws.week = $3 AND ws.season_type = 'regular'
+      WHERE dp.draft_id = $1
+      ORDER BY dp.pick_number`,
+      [draftId, season, week]
+    );
+
+    return result.rows.map(row => DraftPick.fromDatabase(row));
+  }
+
   async createPick(pickData: CreatePickData): Promise<DraftPick> {
     // Insert the pick
     const insertResult = await this.db.query(

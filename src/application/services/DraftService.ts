@@ -76,6 +76,10 @@ export class DraftService {
     return this.runtimeService.getDraftPicks(draftId);
   }
 
+  async getDraftPicksWithStats(leagueId: number, draftId: number, season: string, week: number): Promise<DraftPick[]> {
+    return this.runtimeService.getDraftPicksWithStats(leagueId, draftId, season, week);
+  }
+
   async getDraftState(draftId: number): Promise<any> {
     return this.runtimeService.getDraftState(draftId);
   }
