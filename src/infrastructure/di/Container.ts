@@ -9,6 +9,7 @@ import { IDraftRepository } from '../../domain/repositories/IDraftRepository';
 import { IDraftQueueRepository } from '../../domain/repositories/IDraftQueueRepository';
 import { IPlayerStatsRepository } from '../../domain/repositories/IPlayerStatsRepository';
 import { IPlayerProjectionRepository } from '../../domain/repositories/IPlayerProjectionRepository';
+import { IWeeklyLineupRepository } from '../../domain/repositories/IWeeklyLineupRepository';
 import { UserRepository } from '../repositories/UserRepository';
 import { LeagueRepository } from '../repositories/LeagueRepository';
 import { RosterRepository } from '../repositories/RosterRepository';
@@ -19,6 +20,7 @@ import { DraftRepository } from '../repositories/DraftRepository';
 import { DraftQueueRepository } from '../repositories/DraftQueueRepository';
 import { PlayerStatsRepository } from '../repositories/PlayerStatsRepository';
 import { PlayerProjectionRepository } from '../repositories/PlayerProjectionRepository';
+import { WeeklyLineupRepository } from '../repositories/WeeklyLineupRepository';
 import { AuthService } from '../../application/services/AuthService';
 import { LeagueService } from '../../application/services/LeagueService';
 import { LeaguePaymentService } from '../../application/services/league/LeaguePaymentService';
@@ -35,6 +37,8 @@ import { StatsService } from '../../application/services/StatsService';
 import { StatsSyncService } from '../../application/services/StatsSyncService';
 import { CurrentWeekService } from '../../application/services/CurrentWeekService';
 import { LiveScoreService } from '../../application/services/LiveScoreService';
+import { RosterLineupService } from '../../application/services/RosterLineupService';
+import { DraftUtilityService } from '../../application/services/DraftUtilityService';
 import { SleeperScheduleService } from '../external/SleeperScheduleService';
 import { SocketChatEventsPublisher } from '../../app/runtime/socket/SocketChatEventsPublisher';
 import { SocketDraftEventsPublisher } from '../../app/runtime/socket/SocketDraftEventsPublisher';
@@ -63,6 +67,7 @@ export class Container {
   private _draftQueueRepository?: IDraftQueueRepository;
   private _playerStatsRepository?: IPlayerStatsRepository;
   private _playerProjectionRepository?: IPlayerProjectionRepository;
+  private _weeklyLineupRepository?: IWeeklyLineupRepository;
 
   // Services
   private _authService?: AuthService;
@@ -86,6 +91,8 @@ export class Container {
   private _sleeperScheduleService?: SleeperScheduleService;
   private _currentWeekService?: CurrentWeekService;
   private _liveScoreService?: LiveScoreService;
+  private _rosterLineupService?: RosterLineupService;
+  private _draftUtilityService?: DraftUtilityService;
 
   private constructor(pool: Pool) {
     this.pool = pool;
@@ -473,6 +480,41 @@ export class Container {
   }
 
   /**
+   * Get Weekly Lineup Repository
+   */
+  getWeeklyLineupRepository(): IWeeklyLineupRepository {
+    if (!this._weeklyLineupRepository) {
+      this._weeklyLineupRepository = new WeeklyLineupRepository(this.pool);
+    }
+    return this._weeklyLineupRepository;
+  }
+
+  /**
+   * Get Draft Utility Service
+   */
+  getDraftUtilityService(): DraftUtilityService {
+    if (!this._draftUtilityService) {
+      this._draftUtilityService = new DraftUtilityService(this.pool);
+    }
+    return this._draftUtilityService;
+  }
+
+  /**
+   * Get Roster Lineup Service
+   */
+  getRosterLineupService(): RosterLineupService {
+    if (!this._rosterLineupService) {
+      this._rosterLineupService = new RosterLineupService(
+        this.getWeeklyLineupRepository(),
+        this.getSleeperScheduleService(),
+        this.getDraftUtilityService(),
+        this.pool
+      );
+    }
+    return this._rosterLineupService;
+  }
+
+  /**
    * Reset container (useful for testing)
    */
   reset(): void {
@@ -507,5 +549,8 @@ export class Container {
     this._sleeperScheduleService = undefined;
     this._currentWeekService = undefined;
     this._liveScoreService = undefined;
+    this._weeklyLineupRepository = undefined;
+    this._rosterLineupService = undefined;
+    this._draftUtilityService = undefined;
   }
 }

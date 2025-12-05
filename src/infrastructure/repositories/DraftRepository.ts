@@ -166,18 +166,21 @@ export class DraftRepository implements IDraftRepository {
     draftId: number,
     season: string,
     week: number,
-    scoringSettings: ScoringSettings
+    scoringSettings: ScoringSettings,
+    leagueId?: number
   ): Promise<DraftPick[]> {
     // Use league's actual scoring settings for both projections and actual stats
-    const passYdMult = scoringSettings.passing_yards ?? 0.04;
-    const passTdMult = scoringSettings.passing_td ?? 4;
-    const passIntMult = scoringSettings.interceptions ?? -2;
-    const rushYdMult = scoringSettings.rushing_yards ?? 0.1;
-    const rushTdMult = scoringSettings.rushing_td ?? 6;
-    const recMult = scoringSettings.receptions ?? 0.5;
-    const recYdMult = scoringSettings.receiving_yards ?? 0.1;
-    const recTdMult = scoringSettings.receiving_td ?? 6;
-    const fumLostMult = scoringSettings.fumbles_lost ?? -2;
+    // Handle both naming conventions (e.g., passing_td vs passing_touchdowns, receptions vs receiving_receptions)
+    const s = scoringSettings as Record<string, number | undefined>;
+    const passYdMult = s.passing_yards ?? 0.04;
+    const passTdMult = s.passing_td ?? s.passing_touchdowns ?? 4;
+    const passIntMult = s.interceptions ?? -2;
+    const rushYdMult = s.rushing_yards ?? 0.1;
+    const rushTdMult = s.rushing_td ?? s.rushing_touchdowns ?? 6;
+    const recMult = s.receptions ?? s.receiving_receptions ?? 0.5;
+    const recYdMult = s.receiving_yards ?? 0.1;
+    const recTdMult = s.receiving_td ?? s.receiving_touchdowns ?? 6;
+    const fumLostMult = s.fumbles_lost ?? -2;
 
     // Points calculation for actual stats (weekly stats table has flat columns)
     const pointsCalcStats = `(
@@ -213,16 +216,26 @@ export class DraftRepository implements IDraftRepository {
         p.team as player_team,
         p.sleeper_id as player_sleeper_id,
         CASE WHEN pp.id IS NOT NULL THEN ${pointsCalcProj} ELSE NULL END as projected_pts,
-        CASE WHEN ws.id IS NOT NULL THEN ${pointsCalcStats} ELSE NULL END as actual_pts
+        CASE WHEN ws.id IS NOT NULL THEN ${pointsCalcStats} ELSE NULL END as actual_pts,
+        CASE
+          WHEN wl.id IS NULL THEN true
+          WHEN EXISTS (
+            SELECT 1 FROM jsonb_array_elements(wl.starters) AS s
+            WHERE (s->>'player_id')::int = p.id
+          ) THEN true
+          ELSE false
+        END as is_starter
       FROM draft_picks dp
       LEFT JOIN players p ON p.id = dp.player_id
       LEFT JOIN player_projections pp ON pp.player_sleeper_id = p.sleeper_id
         AND pp.season = $2 AND pp.week = $3 AND pp.season_type = 'regular'
       LEFT JOIN player_weekly_stats ws ON ws.player_sleeper_id = p.sleeper_id
         AND ws.season = $2 AND ws.week = $3 AND ws.season_type = 'regular'
+      LEFT JOIN weekly_lineups wl ON wl.roster_id = dp.roster_id
+        AND wl.league_id = $4 AND wl.week = $3 AND wl.season = $2
       WHERE dp.draft_id = $1
       ORDER BY dp.pick_number`,
-      [draftId, season, week]
+      [draftId, season, week, leagueId]
     );
 
     return result.rows.map(row => DraftPick.fromDatabase(row));
@@ -349,21 +362,23 @@ export class DraftRepository implements IDraftRepository {
       const priorSeason = (parseInt(currentSeason) - 1).toString();
 
       // Default scoring multipliers (standard scoring as fallback)
-      const passYdMult = scoringSettings.passing_yards ?? 0.04;
-      const passTdMult = scoringSettings.passing_td ?? 4;
-      const passIntMult = scoringSettings.interceptions ?? -2;
-      const rushYdMult = scoringSettings.rushing_yards ?? 0.1;
-      const rushTdMult = scoringSettings.rushing_td ?? 6;
-      const recMult = scoringSettings.receptions ?? 0;
-      const recYdMult = scoringSettings.receiving_yards ?? 0.1;
-      const recTdMult = scoringSettings.receiving_td ?? 6;
-      const fumLostMult = scoringSettings.fumbles_lost ?? -2;
-      const fgm0_19Mult = scoringSettings.fgm_0_19 ?? 3;
-      const fgm20_29Mult = scoringSettings.fgm_20_29 ?? 3;
-      const fgm30_39Mult = scoringSettings.fgm_30_39 ?? 3;
-      const fgm40_49Mult = scoringSettings.fgm_40_49 ?? 4;
-      const fgm50pMult = scoringSettings.fgm_50p ?? 5;
-      const xpmMult = scoringSettings.xpm ?? 1;
+      // Handle both key naming conventions (e.g., passing_td vs passing_touchdowns)
+      const ss = scoringSettings as Record<string, number | undefined>;
+      const passYdMult = ss.passing_yards ?? 0.04;
+      const passTdMult = ss.passing_td ?? ss.passing_touchdowns ?? 4;
+      const passIntMult = ss.interceptions ?? -2;
+      const rushYdMult = ss.rushing_yards ?? 0.1;
+      const rushTdMult = ss.rushing_td ?? ss.rushing_touchdowns ?? 6;
+      const recMult = ss.receptions ?? ss.receiving_receptions ?? 0;
+      const recYdMult = ss.receiving_yards ?? 0.1;
+      const recTdMult = ss.receiving_td ?? ss.receiving_touchdowns ?? 6;
+      const fumLostMult = ss.fumbles_lost ?? -2;
+      const fgm0_19Mult = ss.fgm_0_19 ?? 3;
+      const fgm20_29Mult = ss.fgm_20_29 ?? 3;
+      const fgm30_39Mult = ss.fgm_30_39 ?? 3;
+      const fgm40_49Mult = ss.fgm_40_49 ?? 4;
+      const fgm50pMult = ss.fgm_50p ?? 5;
+      const xpmMult = ss.xpm ?? 1;
 
       // Build the points calculation SQL expression for actual stats
       const pointsCalcStats = `(

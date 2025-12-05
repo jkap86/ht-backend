@@ -18,7 +18,8 @@ export class DraftPick {
     public readonly opponent?: string,
     public readonly projectedPts?: number,
     public readonly actualPts?: number,
-    public readonly playerSleeperId?: string
+    public readonly playerSleeperId?: string,
+    public readonly isStarter?: boolean
   ) {}
 
   static fromDatabase(row: any): DraftPick {
@@ -40,7 +41,8 @@ export class DraftPick {
       row.opponent,
       row.projected_pts != null ? parseFloat(row.projected_pts) : undefined,
       row.actual_pts != null ? parseFloat(row.actual_pts) : undefined,
-      row.player_sleeper_id
+      row.player_sleeper_id,
+      row.is_starter === true // Explicitly convert to boolean
     );
   }
 
@@ -63,7 +65,8 @@ export class DraftPick {
       opponent: this.opponent,
       projected_pts: this.projectedPts,
       actual_pts: this.actualPts,
-      player_sleeper_id: this.playerSleeperId
+      player_sleeper_id: this.playerSleeperId,
+      is_starter: this.isStarter
     };
   }
 }

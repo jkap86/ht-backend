@@ -15,8 +15,16 @@ export interface GameSchedule {
     time_remaining?: string;
     [key: string]: any;
   };
-  status: 'in_progress' | 'complete' | 'pre_game';
+  status: 'in_progress' | 'in_game' | 'complete' | 'pre_game';
   start_time: string; // Unix timestamp as string
+}
+
+/**
+ * Helper to check if a game status indicates it's currently live
+ * Sleeper API returns 'in_game' for live games, but we also check 'in_progress' for safety
+ */
+function isGameLive(status: string): boolean {
+  return status === 'in_game' || status === 'in_progress';
 }
 
 interface ScheduleResponse {
@@ -108,7 +116,7 @@ export class SleeperScheduleService {
         return false;
       }
 
-      return schedule.some((game) => game.status === 'in_progress');
+      return schedule.some((game) => isGameLive(game.status));
     } catch (error) {
       logError(error as Error, { context: 'SleeperScheduleService.hasGamesInProgress' });
       return false;
@@ -135,7 +143,7 @@ export class SleeperScheduleService {
 
       for (const game of schedule) {
         // Game is currently in progress
-        if (game.status === 'in_progress') {
+        if (isGameLive(game.status)) {
           return true;
         }
 
@@ -170,8 +178,8 @@ export class SleeperScheduleService {
       const teamsPlaying = new Map<string, string>();
 
       for (const game of schedule) {
-        // Only include games that are in_progress or complete
-        if (game.status === 'in_progress' || game.status === 'complete') {
+        // Only include games that are in_progress/in_game or complete
+        if (isGameLive(game.status) || game.status === 'complete') {
           if (game.metadata?.away_team) {
             teamsPlaying.set(game.metadata.away_team, game.status);
           }
@@ -198,7 +206,7 @@ export class SleeperScheduleService {
   ): Promise<GameSchedule[]> {
     try {
       const schedule = await this.getWeekSchedule(season, week, seasonType);
-      return schedule.filter((game) => game.status === 'in_progress');
+      return schedule.filter((game) => isGameLive(game.status));
     } catch (error) {
       logError(error as Error, { context: 'SleeperScheduleService.getLiveGames' });
       return [];

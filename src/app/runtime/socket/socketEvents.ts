@@ -42,6 +42,7 @@ export const SocketEvents = {
   LEAVE_MATCHUP: 'leave_matchup',
   SCORE_UPDATE: 'score_update',
   LIVE_GAME_STATUS: 'live_game_status',
+  LIVE_PLAYER_STATS: 'live_player_stats',
 } as const;
 
 /**

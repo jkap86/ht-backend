@@ -450,6 +450,12 @@ export class DraftRuntimeService {
    * Get draft picks with stats and opponent for a specific week
    */
   async getDraftPicksWithStats(leagueId: number, draftId: number, season: string, week: number): Promise<DraftPick[]> {
+    // Ensure lineups exist for all rosters in this week
+    // This generates default lineups from draft picks if none are saved
+    const { Container } = await import('../../infrastructure/di/Container');
+    const rosterLineupService = Container.getInstance().getRosterLineupService();
+    await rosterLineupService.ensureLineupsExistForWeek(leagueId, week, season);
+
     // Get league scoring settings
     const leagueResult = await this.pool.query(
       'SELECT scoring_settings FROM leagues WHERE id = $1',
@@ -458,8 +464,8 @@ export class DraftRuntimeService {
 
     const scoringSettings = leagueResult.rows[0]?.scoring_settings || {};
 
-    // Get picks with stats
-    const picks = await this.draftRepository.getDraftPicksWithStats(draftId, season, week, scoringSettings);
+    // Get picks with stats (pass leagueId for lineup lookup)
+    const picks = await this.draftRepository.getDraftPicksWithStats(draftId, season, week, scoringSettings, leagueId);
 
     // Get NFL schedule for opponent lookup
     const { SleeperScheduleService } = await import('../../infrastructure/external/SleeperScheduleService');

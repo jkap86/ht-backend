@@ -33,6 +33,15 @@ import {
   getChatMessages,
   sendChatMessage,
 } from "./leagueChat.controller";
+import {
+  getLineup,
+  saveLineup,
+  getLeagueLineups,
+} from "./rosterLineup.controller";
+import {
+  rosterLineupParamsSchema,
+  saveLineupSchema,
+} from "../validators/schemas/lineup.schemas";
 
 const router = Router();
 
@@ -90,5 +99,18 @@ router.put("/:id/payouts/:payoutId", validateRequest(leaguePayoutParamsSchema, '
 
 // DELETE /api/leagues/:id/payouts/:payoutId - Delete a payout (commissioner only)
 router.delete("/:id/payouts/:payoutId", validateRequest(leaguePayoutParamsSchema, 'params'), deletePayout);
+
+// ============================================
+// Lineup Routes
+// ============================================
+
+// GET /api/leagues/:leagueId/lineups - Get all lineups for a league (for matchup overview)
+router.get("/:leagueId/lineups", getLeagueLineups);
+
+// GET /api/leagues/:leagueId/rosters/:rosterId/lineup - Get lineup for a specific roster
+router.get("/:leagueId/rosters/:rosterId/lineup", getLineup);
+
+// PUT /api/leagues/:leagueId/rosters/:rosterId/lineup - Save lineup for a specific roster
+router.put("/:leagueId/rosters/:rosterId/lineup", validateRequest(saveLineupSchema, 'body'), saveLineup);
 
 export default router;
