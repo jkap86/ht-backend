@@ -1,29 +1,51 @@
-import dotenv from 'dotenv';
+/**
+ * Jest Test Setup
+ * Common configuration and utilities for all tests
+ */
 
-// Load test environment variables
-dotenv.config({ path: '.env.test' });
+// Set test environment with long enough secrets (32+ chars required)
+process.env.NODE_ENV = 'test';
+process.env.JWT_SECRET = 'test-secret-key-for-testing-must-be-32-chars-long';
+process.env.JWT_REFRESH_SECRET = 'test-refresh-secret-for-testing-must-be-32';
 
-// Mock console methods during tests to reduce noise
-global.console = {
-  ...console,
-  // Keep error and warn for debugging
-  error: jest.fn(console.error),
-  warn: jest.fn(console.warn),
-  // Silence log, info, debug in tests
-  log: jest.fn(),
-  info: jest.fn(),
-  debug: jest.fn(),
+// Mock the database pool
+jest.mock('../db/pool', () => ({
+  pool: {
+    query: jest.fn(),
+    connect: jest.fn(),
+    end: jest.fn(),
+  },
+}));
+
+// Mock the logger to avoid console output during tests
+jest.mock('../infrastructure/logger/Logger', () => ({
+  logInfo: jest.fn(),
+  logError: jest.fn(),
+  logDebug: jest.fn(),
+  logWarn: jest.fn(),
+}));
+
+// Global test utilities
+export const mockRequest = (overrides = {}) => ({
+  body: {},
+  params: {},
+  query: {},
+  headers: {},
+  user: undefined,
+  ...overrides,
+});
+
+export const mockResponse = () => {
+  const res: any = {};
+  res.status = jest.fn().mockReturnValue(res);
+  res.json = jest.fn().mockReturnValue(res);
+  res.send = jest.fn().mockReturnValue(res);
+  return res;
 };
 
-// Set test environment
-process.env.NODE_ENV = 'test';
-process.env.JWT_SECRET = 'test-jwt-secret-for-testing-purposes-only-not-for-production';
+export const mockNext = jest.fn();
 
-// Increase timeout for database operations
-jest.setTimeout(10000);
-
-// Clean up after all tests
-afterAll(async () => {
-  // Close any open handles
-  await new Promise(resolve => setTimeout(resolve, 500));
+// Clean up after each test
+afterEach(() => {
+  jest.clearAllMocks();
 });

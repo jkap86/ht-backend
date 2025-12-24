@@ -81,10 +81,10 @@ export class Player {
       row.college,
       row.created_at,
       row.updated_at,
-      // Fantasy stats fields
-      row.prior_season_pts != null ? parseFloat(row.prior_season_pts) : null,
-      row.season_to_date_pts != null ? parseFloat(row.season_to_date_pts) : null,
-      row.remaining_projected_pts != null ? parseFloat(row.remaining_projected_pts) : null
+      // Fantasy stats fields (handle both string and number from DB)
+      row.prior_season_pts != null ? Number(row.prior_season_pts) : null,
+      row.season_to_date_pts != null ? Number(row.season_to_date_pts) : null,
+      row.remaining_projected_pts != null ? Number(row.remaining_projected_pts) : null
     );
   }
 
