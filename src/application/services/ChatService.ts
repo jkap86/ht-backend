@@ -8,6 +8,7 @@ import {
 import { ILeagueChatRepository } from '../../domain/repositories/ILeagueChatRepository';
 import { IDirectMessageRepository } from '../../domain/repositories/IDirectMessageRepository';
 import { sanitizeInput, sanitizeObject } from '../../app/common/utils/sanitizer';
+import { logDebug, logError } from '../../infrastructure/logger/Logger';
 
 /**
  * ChatService
@@ -63,9 +64,12 @@ export class ChatService {
     // Emit via events publisher
     try {
       this.eventsPublisher.emitLeagueMessage(leagueId, chatMessage);
-      console.log('[ChatService] Successfully emitted chat message');
+      logDebug('Successfully emitted chat message', { leagueId });
     } catch (err) {
-      console.error('[ChatService] Failed to emit chat message:', err);
+      logError(err instanceof Error ? err : new Error(String(err)), {
+        context: 'ChatService.sendLeagueChatMessage',
+        leagueId
+      });
     }
 
     return chatMessage;
@@ -91,25 +95,23 @@ export class ChatService {
         sanitizedMetadata
       );
 
-      console.log(
-        '[ChatService] Emitting system message to league',
-        leagueId,
-        ':',
-        message
-      );
+      logDebug('Emitting system message to league', { leagueId, message });
 
       try {
         this.eventsPublisher.emitLeagueMessage(leagueId, systemMessage);
-        console.log('[ChatService] Successfully emitted system message');
+        logDebug('Successfully emitted system message', { leagueId });
       } catch (err) {
-        console.error('[ChatService] Failed to emit system message:', err);
+        logError(err instanceof Error ? err : new Error(String(err)), {
+          context: 'ChatService.sendSystemMessage.emit',
+          leagueId
+        });
       }
     } catch (error) {
       // Log error but don't throw - system messages shouldn't break the main flow
-      console.error(
-        `[ChatService] Failed to send system message to league ${leagueId}:`,
-        error
-      );
+      logError(error instanceof Error ? error : new Error(String(error)), {
+        context: 'ChatService.sendSystemMessage',
+        leagueId
+      });
     }
   }
 
@@ -160,7 +162,11 @@ export class ChatService {
       const conversationId = [senderId, receiverId].sort().join('_');
       this.eventsPublisher.emitDirectMessage(conversationId, directMessage);
     } catch (err) {
-      console.error('[ChatService] Failed to emit direct message:', err);
+      logError(err instanceof Error ? err : new Error(String(err)), {
+        context: 'ChatService.sendDirectMessage',
+        senderId,
+        receiverId
+      });
     }
 
     return directMessage;

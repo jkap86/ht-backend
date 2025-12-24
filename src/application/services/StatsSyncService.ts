@@ -1,6 +1,7 @@
 import { IPlayerStatsRepository, UpsertStatsData } from '../../domain/repositories/IPlayerStatsRepository';
 import { IPlayerProjectionRepository, UpsertProjectionData } from '../../domain/repositories/IPlayerProjectionRepository';
 import { SleeperApiClient, SleeperPlayerStats } from '../../infrastructure/external/SleeperApiClient';
+import { logInfo, logError } from '../../infrastructure/logger/Logger';
 
 export interface SyncResult {
   success: boolean;
@@ -27,20 +28,20 @@ export class StatsSyncService {
     const startTime = Date.now();
 
     try {
-      console.log(`[Stats Sync] Starting stats sync for ${season} week ${week}...`);
+      logInfo('Starting stats sync', { season, week });
 
       // Fetch stats from Sleeper API
       const sleeperStats = await this.sleeperApiClient.fetchWeeklyStats(season, week, seasonType);
       const statsArray = Object.entries(sleeperStats);
 
-      console.log(`[Stats Sync] Fetched ${statsArray.length} player stats from Sleeper API`);
+      logInfo('Fetched player stats from Sleeper API', { count: statsArray.length });
 
       // Transform to our format - use stats.player_id since API returns array with player_id inside each object
       const statsToUpsert: UpsertStatsData[] = statsArray
         .filter(([_, stats]) => stats && stats.player_id)
         .map(([_, stats]) => this.transformStats(stats.player_id.toString(), season, week, seasonType, stats));
 
-      console.log(`[Stats Sync] Upserting ${statsToUpsert.length} stats records...`);
+      logInfo('Upserting stats records', { count: statsToUpsert.length });
 
       // Batch upsert
       const upsertedCount = await this.playerStatsRepository.upsertBatch(statsToUpsert);
@@ -56,7 +57,7 @@ export class StatsSyncService {
         durationMs
       );
 
-      console.log(`[Stats Sync] Completed in ${durationMs}ms - ${upsertedCount} stats upserted`);
+      logInfo('Stats sync completed', { durationMs, upsertedCount });
 
       return {
         success: true,
@@ -68,7 +69,11 @@ export class StatsSyncService {
       const durationMs = Date.now() - startTime;
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
 
-      console.error('[Stats Sync] Error during sync:', error);
+      logError(error instanceof Error ? error : new Error(String(error)), {
+        context: 'StatsSyncService.syncWeeklyStats',
+        season,
+        week
+      });
 
       // Update sync metadata with error
       await this.playerStatsRepository.updateSyncMetadata(
@@ -97,20 +102,20 @@ export class StatsSyncService {
     const startTime = Date.now();
 
     try {
-      console.log(`[Projections Sync] Starting projections sync for ${season} week ${week}...`);
+      logInfo('Starting projections sync', { season, week });
 
       // Fetch projections from Sleeper API
       const sleeperProjections = await this.sleeperApiClient.fetchWeeklyProjections(season, week, seasonType);
       const projectionsArray = Object.entries(sleeperProjections);
 
-      console.log(`[Projections Sync] Fetched ${projectionsArray.length} player projections from Sleeper API`);
+      logInfo('Fetched player projections from Sleeper API', { count: projectionsArray.length });
 
       // Transform to our format - use proj.player_id since API returns array with player_id inside each object
       const projectionsToUpsert: UpsertProjectionData[] = projectionsArray
         .filter(([_, proj]) => proj && proj.player_id)
         .map(([_, proj]) => this.transformProjection(proj.player_id.toString(), season, week, seasonType, proj));
 
-      console.log(`[Projections Sync] Upserting ${projectionsToUpsert.length} projection records...`);
+      logInfo('Upserting projection records', { count: projectionsToUpsert.length });
 
       // Batch upsert
       const upsertedCount = await this.playerProjectionRepository.upsertBatch(projectionsToUpsert);
@@ -126,7 +131,7 @@ export class StatsSyncService {
         durationMs
       );
 
-      console.log(`[Projections Sync] Completed in ${durationMs}ms - ${upsertedCount} projections upserted`);
+      logInfo('Projections sync completed', { durationMs, upsertedCount });
 
       return {
         success: true,
@@ -138,7 +143,11 @@ export class StatsSyncService {
       const durationMs = Date.now() - startTime;
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
 
-      console.error('[Projections Sync] Error during sync:', error);
+      logError(error instanceof Error ? error : new Error(String(error)), {
+        context: 'StatsSyncService.syncWeeklyProjections',
+        season,
+        week
+      });
 
       // Update sync metadata with error
       await this.playerStatsRepository.updateSyncMetadata(
@@ -174,9 +183,11 @@ export class StatsSyncService {
     if (statsResult.success) {
       try {
         await this.playerStatsRepository.refreshSeasonTotals();
-        console.log('[Stats Sync] Season totals materialized view refreshed');
+        logInfo('Season totals materialized view refreshed');
       } catch (error) {
-        console.error('[Stats Sync] Error refreshing season totals:', error);
+        logError(error instanceof Error ? error : new Error(String(error)), {
+          context: 'StatsSyncService.syncAll.refreshSeasonTotals'
+        });
       }
     }
 

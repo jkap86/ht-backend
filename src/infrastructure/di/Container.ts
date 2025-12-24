@@ -10,6 +10,8 @@ import { IDraftQueueRepository } from '../../domain/repositories/IDraftQueueRepo
 import { IPlayerStatsRepository } from '../../domain/repositories/IPlayerStatsRepository';
 import { IPlayerProjectionRepository } from '../../domain/repositories/IPlayerProjectionRepository';
 import { IWeeklyLineupRepository } from '../../domain/repositories/IWeeklyLineupRepository';
+import { ITradeRepository } from '../../domain/repositories/ITradeRepository';
+import { IWaiverClaimRepository } from '../../domain/repositories/IWaiverClaimRepository';
 import { UserRepository } from '../repositories/UserRepository';
 import { LeagueRepository } from '../repositories/LeagueRepository';
 import { RosterRepository } from '../repositories/RosterRepository';
@@ -21,6 +23,8 @@ import { DraftQueueRepository } from '../repositories/DraftQueueRepository';
 import { PlayerStatsRepository } from '../repositories/PlayerStatsRepository';
 import { PlayerProjectionRepository } from '../repositories/PlayerProjectionRepository';
 import { WeeklyLineupRepository } from '../repositories/WeeklyLineupRepository';
+import { TradeRepository } from '../repositories/TradeRepository';
+import { WaiverClaimRepository } from '../repositories/WaiverClaimRepository';
 import { AuthService } from '../../application/services/AuthService';
 import { LeagueService } from '../../application/services/LeagueService';
 import { LeaguePaymentService } from '../../application/services/league/LeaguePaymentService';
@@ -39,6 +43,8 @@ import { CurrentWeekService } from '../../application/services/CurrentWeekServic
 import { LiveScoreService } from '../../application/services/LiveScoreService';
 import { RosterLineupService } from '../../application/services/RosterLineupService';
 import { DraftUtilityService } from '../../application/services/DraftUtilityService';
+import { TradeService } from '../../application/services/TradeService';
+import { WaiverService } from '../../application/services/WaiverService';
 import { SleeperScheduleService } from '../external/SleeperScheduleService';
 import { SocketChatEventsPublisher } from '../../app/runtime/socket/SocketChatEventsPublisher';
 import { SocketDraftEventsPublisher } from '../../app/runtime/socket/SocketDraftEventsPublisher';
@@ -68,6 +74,8 @@ export class Container {
   private _playerStatsRepository?: IPlayerStatsRepository;
   private _playerProjectionRepository?: IPlayerProjectionRepository;
   private _weeklyLineupRepository?: IWeeklyLineupRepository;
+  private _tradeRepository?: ITradeRepository;
+  private _waiverClaimRepository?: IWaiverClaimRepository;
 
   // Services
   private _authService?: AuthService;
@@ -93,6 +101,8 @@ export class Container {
   private _liveScoreService?: LiveScoreService;
   private _rosterLineupService?: RosterLineupService;
   private _draftUtilityService?: DraftUtilityService;
+  private _tradeService?: TradeService;
+  private _waiverService?: WaiverService;
 
   private constructor(pool: Pool) {
     this.pool = pool;
@@ -515,6 +525,53 @@ export class Container {
   }
 
   /**
+   * Get Trade Repository
+   */
+  getTradeRepository(): ITradeRepository {
+    if (!this._tradeRepository) {
+      this._tradeRepository = new TradeRepository(this.pool);
+    }
+    return this._tradeRepository;
+  }
+
+  /**
+   * Get Waiver Claim Repository
+   */
+  getWaiverClaimRepository(): IWaiverClaimRepository {
+    if (!this._waiverClaimRepository) {
+      this._waiverClaimRepository = new WaiverClaimRepository(this.pool);
+    }
+    return this._waiverClaimRepository;
+  }
+
+  /**
+   * Get Trade Service
+   */
+  getTradeService(): TradeService {
+    if (!this._tradeService) {
+      this._tradeService = new TradeService(
+        this.pool,
+        this.getTradeRepository(),
+        this.getWaiverClaimRepository()
+      );
+    }
+    return this._tradeService;
+  }
+
+  /**
+   * Get Waiver Service
+   */
+  getWaiverService(): WaiverService {
+    if (!this._waiverService) {
+      this._waiverService = new WaiverService(
+        this.pool,
+        this.getWaiverClaimRepository()
+      );
+    }
+    return this._waiverService;
+  }
+
+  /**
    * Reset container (useful for testing)
    */
   reset(): void {
@@ -552,5 +609,9 @@ export class Container {
     this._weeklyLineupRepository = undefined;
     this._rosterLineupService = undefined;
     this._draftUtilityService = undefined;
+    this._tradeRepository = undefined;
+    this._waiverClaimRepository = undefined;
+    this._tradeService = undefined;
+    this._waiverService = undefined;
   }
 }

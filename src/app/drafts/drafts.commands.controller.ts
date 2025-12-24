@@ -34,9 +34,6 @@ export const createDraft = async (
     // which provides proper default values (draft_type: 'snake', rounds: 15, etc.)
     const draftData = req.body;
 
-    console.log('[DEBUG] Creating draft with derby settings:', draftData.derby_settings);
-    console.log('[DEBUG] Derby timer seconds:', draftData.derby_settings?.derby_timer_seconds);
-
     const draftService = Container.getInstance().getDraftService();
     const draft = await draftService.createDraft(leagueId, userId, {
       draftType: draftData.draft_type,
@@ -82,9 +79,6 @@ export const updateDraft = async (
 
     // Extract from req.body - validation is handled by Zod middleware
     const draftData = req.body;
-
-    console.log('[DEBUG] Updating draft with derby settings:', draftData.derby_settings);
-    console.log('[DEBUG] Derby timer seconds:', draftData.derby_settings?.derby_timer_seconds);
 
     const draftService = Container.getInstance().getDraftService();
     const draft = await draftService.updateDraft(leagueId, draftId, userId, {

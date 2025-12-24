@@ -8,54 +8,36 @@ import { LeaguePaymentService } from '../../application/services/league/LeaguePa
 import { LeagueResetService } from '../../application/services/league/LeagueResetService';
 import { LeagueMembershipService } from '../../application/services/league/LeagueMembershipService';
 import { LeagueSettingsService } from '../../application/services/league/LeagueSettingsService';
-import { pool } from '../../db/pool';
+import { DraftUtilityService } from '../../application/services/DraftUtilityService';
 
-// Helper function to get LeagueService from DI Container
+// Helper functions to get services from DI Container
 function getLeagueService(): LeagueService {
   return Container.getInstance().getLeagueService();
 }
 
-// Helper function to get LeaguePaymentService from DI Container
 function getLeaguePaymentService(): LeaguePaymentService {
   return Container.getInstance().getLeaguePaymentService();
 }
 
-// Helper function to get LeagueResetService from DI Container
 function getLeagueResetService(): LeagueResetService {
   return Container.getInstance().getLeagueResetService();
 }
 
-// Helper function to get LeagueMembershipService from DI Container
 function getLeagueMembershipService(): LeagueMembershipService {
   return Container.getInstance().getLeagueMembershipService();
 }
 
-// Helper function to get LeagueSettingsService from DI Container
 function getLeagueSettingsService(): LeagueSettingsService {
   return Container.getInstance().getLeagueSettingsService();
 }
 
-// Helper function to check if user is commissioner
+function getDraftUtilityService(): DraftUtilityService {
+  return Container.getInstance().getDraftUtilityService();
+}
+
+// Use service layer for commissioner check instead of direct DB access
 async function isUserCommissioner(leagueId: number, userId: string): Promise<boolean> {
-  const result = await pool.query(
-    `SELECT l.settings->>'commissioner_roster_id' as commissioner_roster_id,
-            r.roster_id
-     FROM leagues l
-     INNER JOIN rosters r ON r.league_id = l.id AND r.user_id = $2
-     WHERE l.id = $1`,
-    [leagueId, userId]
-  );
-
-  if (result.rows.length === 0) {
-    return false;
-  }
-
-  const row = result.rows[0];
-  return (
-    row.commissioner_roster_id &&
-    row.roster_id &&
-    row.commissioner_roster_id === row.roster_id.toString()
-  );
+  return getDraftUtilityService().isUserCommissioner(leagueId, userId);
 }
 
 /**

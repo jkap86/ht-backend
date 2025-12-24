@@ -145,11 +145,21 @@ export class DraftRepository implements IDraftRepository {
   async getDraftPicks(draftId: number): Promise<DraftPick[]> {
     const result = await this.db.query(
       `SELECT
-        dp.*,
+        dp.id,
+        dp.draft_id,
+        dp.pick_number,
+        dp.round,
+        dp.pick_in_round,
+        r.roster_id as roster_id,
+        dp.player_id,
+        dp.is_auto_pick,
+        dp.picked_at,
+        dp.pick_time_seconds,
         p.full_name as player_name,
         p.position as player_position,
         p.team as player_team
       FROM draft_picks dp
+      INNER JOIN rosters r ON r.id = dp.roster_id
       LEFT JOIN players p ON p.id = dp.player_id
       WHERE dp.draft_id = $1
       ORDER BY dp.pick_number`,
@@ -210,7 +220,16 @@ export class DraftRepository implements IDraftRepository {
 
     const result = await this.db.query(
       `SELECT
-        dp.*,
+        dp.id,
+        dp.draft_id,
+        dp.pick_number,
+        dp.round,
+        dp.pick_in_round,
+        r.roster_id as roster_id,
+        dp.player_id,
+        dp.is_auto_pick,
+        dp.picked_at,
+        dp.pick_time_seconds,
         p.full_name as player_name,
         p.position as player_position,
         p.team as player_team,
@@ -226,12 +245,13 @@ export class DraftRepository implements IDraftRepository {
           ELSE false
         END as is_starter
       FROM draft_picks dp
+      INNER JOIN rosters r ON r.id = dp.roster_id
       LEFT JOIN players p ON p.id = dp.player_id
       LEFT JOIN player_projections pp ON pp.player_sleeper_id = p.sleeper_id
         AND pp.season = $2 AND pp.week = $3 AND pp.season_type = 'regular'
       LEFT JOIN player_weekly_stats ws ON ws.player_sleeper_id = p.sleeper_id
         AND ws.season = $2 AND ws.week = $3 AND ws.season_type = 'regular'
-      LEFT JOIN weekly_lineups wl ON wl.roster_id = dp.roster_id
+      LEFT JOIN weekly_lineups wl ON wl.roster_id = r.roster_id
         AND wl.league_id = $4 AND wl.week = $3 AND wl.season = $2
       WHERE dp.draft_id = $1
       ORDER BY dp.pick_number`,

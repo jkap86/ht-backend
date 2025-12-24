@@ -90,7 +90,8 @@ export class LeagueRepository implements ILeagueRepository {
     }
 
     if (updates.settings) {
-      setClauses.push(`settings = $${paramIndex++}`);
+      // Merge with existing settings instead of replacing
+      setClauses.push(`settings = COALESCE(settings, '{}'::jsonb) || $${paramIndex++}::jsonb`);
       values.push(JSON.stringify(updates.settings));
     }
 

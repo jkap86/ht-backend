@@ -1,6 +1,7 @@
 // src/app/middleware/auth.middleware.ts
 import { Request, Response, NextFunction } from "express";
 import { verifyToken } from "../utils/jwt";
+import { logDebug } from "../../../infrastructure/logger/Logger";
 
 export interface AuthRequest extends Request {
   user?: {
@@ -34,7 +35,12 @@ export const authMiddleware = (
     };
 
     next();
-  } catch {
+  } catch (err) {
+    // Log the error for debugging (helps identify token issues)
+    logDebug("Token verification failed", {
+      error: err instanceof Error ? err.message : "Unknown error",
+      path: req.path,
+    });
     return res.status(401).json({ error: "Invalid or expired token" });
   }
 };

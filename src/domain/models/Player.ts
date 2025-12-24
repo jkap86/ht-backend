@@ -1,3 +1,34 @@
+/**
+ * Database row interface for type safety
+ */
+export interface PlayerDatabaseRow {
+  id: number;
+  sleeper_id: string;
+  first_name: string | null;
+  last_name: string | null;
+  full_name: string;
+  fantasy_positions: string[] | null;
+  position: string | null;
+  team: string | null;
+  years_exp: number | null;
+  age: number | null;
+  active: boolean;
+  status: string | null;
+  injury_status: string | null;
+  injury_notes: string | null;
+  depth_chart_position: number | null;
+  jersey_number: number | null;
+  height: string | null;
+  weight: string | null;
+  college: string | null;
+  created_at: Date;
+  updated_at: Date;
+  // Optional stats fields from joined queries
+  prior_season_pts?: string | number | null;
+  season_to_date_pts?: string | number | null;
+  remaining_projected_pts?: string | number | null;
+}
+
 export class Player {
   constructor(
     public readonly id: number,
@@ -27,7 +58,7 @@ export class Player {
     public readonly remainingProjectedPts: number | null = null
   ) {}
 
-  static fromDatabase(row: any): Player {
+  static fromDatabase(row: PlayerDatabaseRow): Player {
     return new Player(
       row.id,
       row.sleeper_id,

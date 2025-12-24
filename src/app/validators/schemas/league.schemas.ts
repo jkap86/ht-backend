@@ -18,15 +18,34 @@ export const rosterPositionSchema = z.object({
 });
 
 /**
- * Schema for league settings
+ * Schema for league settings - includes Sleeper-like waiver options
  */
 export const leagueSettingsSchema = z.object({
   commissioner_roster_id: z.number().int().optional(),
-  waiver_type: z.enum(['rolling', 'faab']).optional(),
-  waiver_budget: z.number().int().min(0).optional(),
+
+  // Waiver Settings (Sleeper-like)
+  waivers_enabled: z.boolean().optional().default(true),
+  waiver_type: z.enum(['rolling', 'faab', 'reverse_standings']).optional(),
+  waiver_budget: z.number().int().min(0).max(9999).optional(), // FAAB budget
+  waiver_period_days: z.number().int().min(0).max(7).optional().default(2),
+  waiver_day_of_week: z.number().int().min(0).max(6).optional().default(2), // 0=Sun, 1=Mon, 2=Tue, etc.
+  waiver_clear_time: z.string().regex(/^([01]\d|2[0-3]):([0-5]\d)$/).optional().default('00:00'),
+  continuous_waivers: z.boolean().optional().default(false), // Waivers run all week
+  lock_players_at_game_start: z.boolean().optional().default(true),
+  min_faab_bid: z.number().int().min(0).optional().default(0),
+  waiver_priority_reset: z.enum(['never', 'weekly', 'end_of_season']).optional().default('never'),
+
+  // Trade Settings
+  trade_deadline: z.string().optional(), // ISO date string for deadline
   trade_deadline_week: z.number().int().min(1).max(18).optional(),
+  trade_review_period_hours: z.number().int().min(0).max(72).optional().default(24),
+  trades_enabled: z.boolean().optional().default(true),
+
+  // Playoff Settings
   playoff_teams: z.number().int().min(2).max(12).optional(),
   playoff_start_week: z.number().int().min(1).max(18).optional(),
+
+  // Other Settings
   allow_custom_scoring: z.boolean().optional(),
   veto_threshold: z.number().int().min(1).optional(),
   veto_period_hours: z.number().int().min(1).max(72).optional(),
@@ -78,7 +97,7 @@ export const createLeagueSchema = z.object({
     .string()
     .max(500, 'Description must be less than 500 characters')
     .optional(),
-  settings: leagueSettingsSchema.optional().default({}),
+  settings: leagueSettingsSchema.optional(),
   scoring_settings: scoringSettingsSchema.optional().default({}),
   roster_positions: z
     .array(rosterPositionSchema)

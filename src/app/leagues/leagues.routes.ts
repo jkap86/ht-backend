@@ -42,8 +42,15 @@ import {
   rosterLineupParamsSchema,
   saveLineupSchema,
 } from "../validators/schemas/lineup.schemas";
+import { TradesController } from "./trades.controller";
+import { WaiversController } from "./waivers.controller";
+import { Container } from "../../infrastructure/di/Container";
 
 const router = Router();
+
+// Lazy-load controllers to ensure Container is initialized
+const getTradesController = () => new TradesController(Container.getInstance().getTradeService());
+const getWaiversController = () => new WaiversController(Container.getInstance().getWaiverService());
 
 // All league routes require authentication
 router.use(authMiddleware);
@@ -112,5 +119,52 @@ router.get("/:leagueId/rosters/:rosterId/lineup", getLineup);
 
 // PUT /api/leagues/:leagueId/rosters/:rosterId/lineup - Save lineup for a specific roster
 router.put("/:leagueId/rosters/:rosterId/lineup", validateRequest(saveLineupSchema, 'body'), saveLineup);
+
+// ============================================
+// Trade Routes
+// ============================================
+
+// GET /api/leagues/:leagueId/trades - Get all trades for a league
+router.get("/:leagueId/trades", (req, res) => getTradesController().getTrades(req, res));
+
+// GET /api/leagues/:leagueId/trades/:tradeId - Get a specific trade
+router.get("/:leagueId/trades/:tradeId", (req, res) => getTradesController().getTradeById(req, res));
+
+// POST /api/leagues/:leagueId/trades - Propose a new trade
+router.post("/:leagueId/trades", (req, res) => getTradesController().proposeTrade(req, res));
+
+// PUT /api/leagues/:leagueId/trades/:tradeId/accept - Accept a trade
+router.put("/:leagueId/trades/:tradeId/accept", (req, res) => getTradesController().acceptTrade(req, res));
+
+// PUT /api/leagues/:leagueId/trades/:tradeId/reject - Reject a trade
+router.put("/:leagueId/trades/:tradeId/reject", (req, res) => getTradesController().rejectTrade(req, res));
+
+// DELETE /api/leagues/:leagueId/trades/:tradeId - Cancel a trade
+router.delete("/:leagueId/trades/:tradeId", (req, res) => getTradesController().cancelTrade(req, res));
+
+// PUT /api/leagues/:leagueId/trades/:tradeId/veto - Veto a trade (commissioner only)
+router.put("/:leagueId/trades/:tradeId/veto", (req, res) => getTradesController().vetoTrade(req, res));
+
+// ============================================
+// Waiver & Free Agent Routes
+// ============================================
+
+// GET /api/leagues/:leagueId/waivers - Get waiver claims for a league
+router.get("/:leagueId/waivers", (req, res) => getWaiversController().getWaiverClaims(req, res));
+
+// GET /api/leagues/:leagueId/players/available - Get available free agents
+router.get("/:leagueId/players/available", (req, res) => getWaiversController().getAvailablePlayers(req, res));
+
+// POST /api/leagues/:leagueId/waivers - Submit a waiver claim
+router.post("/:leagueId/waivers", (req, res) => getWaiversController().submitClaim(req, res));
+
+// DELETE /api/leagues/:leagueId/waivers/:claimId - Cancel a waiver claim
+router.delete("/:leagueId/waivers/:claimId", (req, res) => getWaiversController().cancelClaim(req, res));
+
+// POST /api/leagues/:leagueId/players/:playerId/add - Add a free agent directly
+router.post("/:leagueId/players/:playerId/add", (req, res) => getWaiversController().addFreeAgent(req, res));
+
+// GET /api/leagues/:leagueId/transactions - Get transaction history
+router.get("/:leagueId/transactions", (req, res) => getWaiversController().getTransactionHistory(req, res));
 
 export default router;

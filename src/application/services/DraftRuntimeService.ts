@@ -331,7 +331,7 @@ export class DraftRuntimeService {
       }
     }
 
-    // Fall back to highest projected value player if no queue or queue is empty
+    // Fall back to smart position-based selection if no queue or queue is empty
     if (!selectedPlayer) {
       const playerPool = draft.settings?.player_pool || 'all';
 
@@ -367,9 +367,16 @@ export class DraftRuntimeService {
         return null;
       }
 
-      // Select first player (highest projected value due to ORDER BY in query)
-      selectedPlayer = availablePlayers[0];
-      console.log(`[Draft Auto-Pick] No queue, selecting highest projected player: ${selectedPlayer.fullName} (${selectedPlayer.position})`);
+      // Smart position-based autopick: prioritize filling starting slots
+      selectedPlayer = await this.selectPlayerForStartingSlots(
+        draftId,
+        currentPicker.rosterId,
+        draft.leagueId,
+        availablePlayers,
+        rosterPositions
+      );
+
+      console.log(`[Draft Auto-Pick] Selected player: ${selectedPlayer.fullName} (${selectedPlayer.position})`);
     }
 
     // Create auto-pick
@@ -707,5 +714,147 @@ export class DraftRuntimeService {
    */
   async getAllAutopickStatuses(leagueId: number): Promise<Map<number, boolean>> {
     return this.draftRepository.getAllAutopickStatuses(leagueId);
+  }
+
+  /**
+   * Smart player selection for autopick - prioritizes filling starting roster slots
+   * Returns the best available player that can fill an open starting slot,
+   * or the best overall player if all starting slots are filled
+   */
+  private async selectPlayerForStartingSlots(
+    draftId: number,
+    rosterId: number,
+    leagueId: number,
+    availablePlayers: Player[],
+    rosterPositions: any[]
+  ): Promise<Player> {
+    // Get positions of players already drafted by this roster
+    const draftedPositions = await this.getRosterDraftedPositions(draftId, rosterId);
+
+    // Calculate starting slot requirements (excluding bench)
+    const starterSlotNeeds = this.calculateStarterSlotNeeds(rosterPositions, draftedPositions);
+
+    // Get positions that still need to be filled for starting slots
+    const neededPositions = new Set<string>();
+    for (const [slotType, needed] of Object.entries(starterSlotNeeds)) {
+      if (needed > 0) {
+        // Get which player positions can fill this slot type
+        const eligiblePositions = this.getEligiblePositionsForSlot(slotType);
+        eligiblePositions.forEach(pos => neededPositions.add(pos));
+      }
+    }
+
+    console.log(`[Draft Auto-Pick] Starter slot needs:`, starterSlotNeeds);
+    console.log(`[Draft Auto-Pick] Needed positions:`, Array.from(neededPositions));
+
+    // If there are unfilled starting slots, prioritize players for those positions
+    if (neededPositions.size > 0) {
+      // Find the best available player whose position can fill a starting slot
+      const playerForStarter = availablePlayers.find(p =>
+        p.position && neededPositions.has(p.position.toUpperCase())
+      );
+
+      if (playerForStarter) {
+        console.log(`[Draft Auto-Pick] Found player for open starter slot: ${playerForStarter.fullName} (${playerForStarter.position})`);
+        return playerForStarter;
+      }
+    }
+
+    // All starting slots are filled (or no eligible players found), pick best available
+    console.log(`[Draft Auto-Pick] All starters filled or no eligible players, picking best available`);
+    return availablePlayers[0];
+  }
+
+  /**
+   * Get positions of players already drafted by a roster in this draft
+   */
+  private async getRosterDraftedPositions(draftId: number, rosterId: number): Promise<Map<string, number>> {
+    const result = await this.pool.query(
+      `SELECT p.position, COUNT(*) as count
+       FROM draft_picks dp
+       JOIN players p ON p.id = dp.player_id
+       WHERE dp.draft_id = $1 AND dp.roster_id = $2
+       GROUP BY p.position`,
+      [draftId, rosterId]
+    );
+
+    const positionCounts = new Map<string, number>();
+    for (const row of result.rows) {
+      positionCounts.set(row.position.toUpperCase(), parseInt(row.count));
+    }
+
+    return positionCounts;
+  }
+
+  /**
+   * Calculate how many more players are needed for each starter slot type
+   * Returns a map of slot type to number of additional players needed
+   */
+  private calculateStarterSlotNeeds(
+    rosterPositions: any[],
+    draftedPositions: Map<string, number>
+  ): Record<string, number> {
+    const slotNeeds: Record<string, number> = {};
+
+    // Count total slots needed for each position type (excluding bench)
+    for (const slot of rosterPositions) {
+      const position = slot.position?.toUpperCase();
+      const count = slot.count || 0;
+
+      // Skip bench slots - we don't prioritize filling bench
+      if (position === 'BN' || position === 'BENCH') continue;
+
+      if (position && count > 0) {
+        slotNeeds[position] = (slotNeeds[position] || 0) + count;
+      }
+    }
+
+    // Calculate how many more are needed based on what's been drafted
+    // For FLEX/SUPER_FLEX, we need to check eligible positions
+    const result: Record<string, number> = {};
+
+    for (const [slotType, slotsNeeded] of Object.entries(slotNeeds)) {
+      const eligiblePositions = this.getEligiblePositionsForSlot(slotType);
+
+      // Count how many drafted players can fill this slot type
+      let draftedForSlot = 0;
+      for (const pos of eligiblePositions) {
+        draftedForSlot += draftedPositions.get(pos) || 0;
+      }
+
+      // For specific positions (QB, RB, etc), only count exact matches
+      // For flex slots, we already counted all eligible
+      if (slotType === 'QB' || slotType === 'RB' || slotType === 'WR' ||
+          slotType === 'TE' || slotType === 'K' || slotType === 'DEF') {
+        draftedForSlot = draftedPositions.get(slotType) || 0;
+      }
+
+      result[slotType] = Math.max(0, slotsNeeded - draftedForSlot);
+    }
+
+    return result;
+  }
+
+  /**
+   * Get player positions eligible for a roster slot type
+   */
+  private getEligiblePositionsForSlot(slotType: string): string[] {
+    const slot = slotType.toUpperCase();
+
+    // Position eligibility mapping
+    const eligibility: Record<string, string[]> = {
+      QB: ['QB'],
+      RB: ['RB'],
+      WR: ['WR'],
+      TE: ['TE'],
+      K: ['K'],
+      DEF: ['DEF'],
+      FLEX: ['RB', 'WR', 'TE'],
+      SUPER_FLEX: ['QB', 'RB', 'WR', 'TE'],
+      REC_FLEX: ['WR', 'TE'],
+      IDP_FLEX: ['DL', 'LB', 'DB'],
+    };
+
+    return eligibility[slot] || [slot];
   }
 }
